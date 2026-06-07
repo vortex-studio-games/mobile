@@ -1,0 +1,70 @@
+name: iOS spike (simulator)
+
+# Phase 0 canary: proves the wgpu -> Metal -> CAMetalLayer bridge still renders.
+# Runs on the self-hosted macOS runner, operating inside the persistent
+# enjin-workspace (go.work) rather than a fresh checkout, so it reproduces what a
+# developer would run on the Mac. The screencheck tool and the sim-run helper it
+# uses live in the engine repo (vortex.studio/enjin) and are reached via the
+# shared workspace. See enjin/docs/ios-implementation-plan.md.
+
+on:
+  push:
+    branches: [enjin, "feature/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-spike-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  spike:
+    runs-on: [self-hosted, macOS, arm64, metal]
+    env:
+      BUNDLE_ID: vortex.studio.enjinspike
+      OUT: ${{ github.workspace }}/ci-out
+    steps:
+      - name: Resolve persistent workspace
+        run: echo "WS=${ENJIN_WORKSPACE:-$HOME/enjin-workspace}" >> "$GITHUB_ENV"
+
+      - name: Sync mobile fork to this commit
+        run: |
+          set -euxo pipefail
+          git -C "$WS/mobile" fetch origin
+          git -C "$WS/mobile" checkout --force "$GITHUB_SHA"
+
+      - name: Build gomobile from the fork (no Android gate)
+        run: |
+          set -euxo pipefail
+          # NB: not `make gomobile-build-tool` — that target requires ANDROID_HOME/NDK,
+          # which an iOS-only runner need not have. Build the binary directly.
+          cd "$WS/mobile" && go build -o gomobile ./cmd/gomobile
+
+      - name: Build the Phase 0 spike for the simulator
+        run: |
+          set -euxo pipefail
+          mkdir -p "$OUT"
+          cd "$WS/mobile/example/enjin-wgpu-ios"
+          "$WS/mobile/gomobile" build -target=iossimulator -bundleid "$BUNDLE_ID" -o "$OUT/enjinspike.app" .
+
+      - name: Boot simulator, launch, screenshot
+        run: |
+          "$WS/enjin/tools/scripts/ios-sim-run.sh" "$OUT/enjinspike.app" "$BUNDLE_ID" "$OUT"
+
+      - name: Assert clear-color rendered + clean console
+        run: |
+          # The spike cycles through blue-ish clear colors, so assert "not black"
+          # (something rendered) + "blue-dominant" rather than an exact color.
+          go -C "$WS/enjin" run ./tools/ios-screencheck \
+            -img "$OUT/screenshot.png" -region all \
+            -not 000000 -tol 24 -dominant b -dommargin 10 \
+            -log "$OUT/console.log" \
+            -forbid "panic:,fatal error:,SIGABRT,SIGSEGV"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-spike-${{ github.run_id }}
+          path: ${{ env.OUT }}
+          if-no-files-found: warn
