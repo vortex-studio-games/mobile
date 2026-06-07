@@ -1,4 +1,4 @@
-module golang.org/x/mobile
+module vortex.studio/mobile
 
 go 1.25.0
 

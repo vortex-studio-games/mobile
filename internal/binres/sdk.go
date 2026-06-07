@@ -13,11 +13,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"golang.org/x/mobile/internal/sdkpath"
+	"vortex.studio/mobile/internal/sdkpath"
 )
 
 // MinSDK is the targeted sdk version for support by package binres.
-const MinSDK = 16
+// Updated to 31 to include android:exported attribute required for Android 12+
+const MinSDK = 31
 
 func apiResources() ([]byte, error) {
 	apiResPath, err := apiResourcesPath()

@@ -17,7 +17,7 @@ import (
 	"strconv"
 	"strings"
 
-	"golang.org/x/mobile/internal/sdkpath"
+	"vortex.studio/mobile/internal/sdkpath"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -65,6 +65,13 @@ By default, no minimum macOS version is set.
 
 Flag -androidapi sets the Android API version to compile against.
 The default and minimum is 16.
+
+Flag -androidMinSDK sets the minimum supported Android SDK version
+(uses-sdk/android:minSdkVersion in AndroidManifest.xml). The default is 24.
+
+Flag -androidTargetSDK sets the target Android SDK version
+(uses-sdk/android:targetSdkVersion in AndroidManifest.xml). The default is 34.
+This is required for Google Play Store submissions.
 
 The -bundleid flag is required for -target ios and sets the bundle ID to use
 with the app.
@@ -172,18 +179,18 @@ func runBuildImpl(cmd *command) (*packages.Package, error) {
 		}
 	}
 
-	if !nmpkgs["golang.org/x/mobile/app"] {
-		return nil, fmt.Errorf(`%s does not import "golang.org/x/mobile/app"`, pkg.PkgPath)
+	if !nmpkgs["vortex.studio/mobile/app"] {
+		return nil, fmt.Errorf(`%s does not import "vortex.studio/mobile/app"`, pkg.PkgPath)
 	}
 
 	return pkg, nil
 }
 
-var nmRE = regexp.MustCompile(`[0-9a-f]{8} t _?(?:.*/vendor/)?(golang.org/x.*/[^.]*)`)
+var nmRE = regexp.MustCompile(`[0-9a-f]{8} t _?(?:.*/vendor/)?((?:golang.org/x|vortex.studio/mobile)(?:/[^.]*)?)`)
 
 func extractPkgs(nm string, path string) (map[string]bool, error) {
 	if buildN {
-		return map[string]bool{"golang.org/x/mobile/app": true}, nil
+		return map[string]bool{"vortex.studio/mobile/app": true}, nil
 	}
 	r, w := io.Pipe()
 	cmd := exec.Command(nm, path)
@@ -237,23 +244,31 @@ func printcmd(format string, args ...interface{}) {
 
 // "Build flags", used by multiple commands.
 var (
-	buildA            bool        // -a
-	buildI            bool        // -i
-	buildN            bool        // -n
-	buildV            bool        // -v
-	buildX            bool        // -x
-	buildO            string      // -o
-	buildGcflags      string      // -gcflags
-	buildLdflags      string      // -ldflags
-	buildOverlay      string      // -overlay
-	buildTarget       string      // -target
-	buildTrimpath     bool        // -trimpath
-	buildWork         bool        // -work
-	buildBundleID     string      // -bundleid
-	buildIOSVersion   string      // -iosversion
-	buildMacOSVersion string      // -macosversion
-	buildAndroidAPI   int         // -androidapi
-	buildTags         stringsFlag // -tags
+	buildA                bool        // -a
+	buildI                bool        // -i
+	buildN                bool        // -n
+	buildV                bool        // -v
+	buildX                bool        // -x
+	buildO                string      // -o
+	buildGcflags          string      // -gcflags
+	buildLdflags          string      // -ldflags
+	buildOverlay          string      // -overlay
+	buildTarget           string      // -target
+	buildTrimpath         bool        // -trimpath
+	buildWork             bool        // -work
+	buildBundleID         string      // -bundleid
+	buildIOSVersion       string      // -iosversion
+	buildMacOSVersion     string      // -macosversion
+	buildAndroidAPI       int         // -androidapi
+	buildAndroidMinSDK    int         // -androidMinSDK
+	buildAndroidTargetSDK int         // -androidTargetSDK
+	buildTags             stringsFlag // -tags
+)
+
+// Android SDK version constants
+const (
+	defaultAndroidMinSDK    = 24 // Android 7.0 Nougat
+	defaultAndroidTargetSDK = 34 // Android 14 (2024 Play Store requirement)
 )
 
 func addBuildFlags(cmd *command) {
@@ -266,6 +281,8 @@ func addBuildFlags(cmd *command) {
 	cmd.flag.StringVar(&buildIOSVersion, "iosversion", "13.0", "")
 	cmd.flag.StringVar(&buildMacOSVersion, "macosversion", "", "")
 	cmd.flag.IntVar(&buildAndroidAPI, "androidapi", minAndroidAPI, "")
+	cmd.flag.IntVar(&buildAndroidMinSDK, "androidMinSDK", defaultAndroidMinSDK, "")
+	cmd.flag.IntVar(&buildAndroidTargetSDK, "androidTargetSDK", defaultAndroidTargetSDK, "")
 
 	cmd.flag.BoolVar(&buildA, "a", false, "")
 	cmd.flag.BoolVar(&buildI, "i", false, "")
