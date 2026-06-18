@@ -55,10 +55,14 @@ jobs:
         run: |
           # The spike cycles through blue-ish clear colors, so assert "not black"
           # (something rendered) + "blue-dominant" rather than an exact color.
+          # The color check alone passes on the simulator home screen, so also
+          # require the spike's positive console markers — proving the Metal
+          # surface actually came up, not that we screenshotted the launcher.
           go -C "$WS/enjin" run ./tools/ios-screencheck \
             -img "$OUT/screenshot.png" -region all \
             -not 000000 -tol 24 -dominant b -dommargin 10 \
             -log "$OUT/console.log" \
+            -require "backend=metal,surface configured" \
             -forbid "panic:,fatal error:,SIGABRT,SIGSEGV"
 
       - name: Upload artifacts
