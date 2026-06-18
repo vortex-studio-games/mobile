@@ -38,10 +38,25 @@ func goAppleBuild(pkg *packages.Package, bundleID string, targets []targetInfo) 
 		return nil, err
 	}
 
-	// Detect the team ID
-	teamID, err := detectTeamID()
-	if err != nil {
-		return nil, err
+	// Code signing is required to build for a physical device, but the iOS
+	// Simulator runs unsigned apps. Detect a simulator-only build and skip the
+	// signing-identity lookup so a Mac with no Apple Development certificate
+	// (e.g. a headless CI build appliance) can still produce a runnable .app.
+	simOnly := true
+	for _, t := range targets {
+		if t.platform != "iossimulator" {
+			simOnly = false
+			break
+		}
+	}
+
+	var teamID string
+	if !simOnly {
+		var err error
+		teamID, err = detectTeamID()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	projPbxproj := new(bytes.Buffer)
@@ -122,14 +137,33 @@ func goAppleBuild(pkg *packages.Package, bundleID string, targets []targetInfo) 
 		"xcodebuild",
 		"-configuration", "Release",
 		"-project", tmpdir + "/main.xcodeproj",
-		"-allowProvisioningUpdates",
-		"DEVELOPMENT_TEAM=" + teamID,
+	}
+	if simOnly {
+		// Target the simulator SDK and disable code signing: the simulator runs
+		// unsigned apps, and a build appliance may hold no signing identity.
+		cmdStrings = append(cmdStrings,
+			"-sdk", "iphonesimulator",
+			"CODE_SIGNING_ALLOWED=NO",
+			"CODE_SIGNING_REQUIRED=NO",
+		)
+	} else {
+		cmdStrings = append(cmdStrings,
+			"-allowProvisioningUpdates",
+			"DEVELOPMENT_TEAM="+teamID,
+		)
 	}
 
 	cmd = exec.Command("xcrun", cmdStrings...)
 	if err := runCmd(cmd); err != nil {
 		return nil, err
 	}
+
+	// xcodebuild writes to a per-SDK products dir.
+	releaseDir := "Release-iphoneos"
+	if simOnly {
+		releaseDir = "Release-iphonesimulator"
+	}
+	builtApp := tmpdir + "/build/" + releaseDir + "/main.app"
 
 	// TODO(jbd): Fallback to copying if renaming fails.
 	if buildO == "" {
@@ -146,14 +180,14 @@ func goAppleBuild(pkg *packages.Package, bundleID string, targets []targetInfo) 
 		buildO = n + ".app"
 	}
 	if buildX {
-		printcmd("mv %s %s", tmpdir+"/build/Release-iphoneos/main.app", buildO)
+		printcmd("mv %s %s", builtApp, buildO)
 	}
 	if !buildN {
 		// if output already exists, remove.
 		if err := os.RemoveAll(buildO); err != nil {
 			return nil, err
 		}
-		if err := os.Rename(tmpdir+"/build/Release-iphoneos/main.app", buildO); err != nil {
+		if err := os.Rename(builtApp, buildO); err != nil {
 			return nil, err
 		}
 	}
