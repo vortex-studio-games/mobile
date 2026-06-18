@@ -412,8 +412,8 @@ var projPbxprojTmpl = template.Must(template.New("projPbxproj").Parse(`// !$*UTF
         ORGANIZATIONNAME = Developer;
         TargetAttributes = {
           254BB83D1B1FD08900C56DE9 = {
-            CreatedOnToolsVersion = 6.3.1;
-            DevelopmentTeam = {{.TeamID}};
+            CreatedOnToolsVersion = 6.3.1;{{if .TeamID}}
+            DevelopmentTeam = {{.TeamID}};{{end}}
           };
         };
       };
