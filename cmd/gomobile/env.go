@@ -263,6 +263,19 @@ func envInit() (err error) {
 				return err
 			}
 
+			ldflags := cflags + " -arch " + archClang(arch)
+			// The cogentcore/webgpu binding ships no arm64 iOS-simulator slice of
+			// libwgpu_native.a — only device-arm64 and x86_64-simulator — and cgo
+			// cannot tell device from simulator (both are GOOS=ios/arm64). Prepend
+			// our matching arm64-simulator archive so the static linker resolves
+			// the wgpu symbols from it first, making the binding's device
+			// -lwgpu_native a no-op. See the mobile fork's wgpunative/README.md.
+			if platform == "iossimulator" && arch == "arm64" {
+				if lib := iosSimWgpuLib(); lib != "" {
+					ldflags = lib + " " + ldflags
+				}
+			}
+
 			env = append(env,
 				"GOOS="+goos,
 				"GOARCH="+arch,
@@ -271,7 +284,7 @@ func envInit() (err error) {
 				"CXX="+clang+"++",
 				"CGO_CFLAGS="+cflags+" -arch "+archClang(arch),
 				"CGO_CXXFLAGS="+cflags+" -arch "+archClang(arch),
-				"CGO_LDFLAGS="+cflags+" -arch "+archClang(arch),
+				"CGO_LDFLAGS="+ldflags,
 				"CGO_ENABLED=1",
 				"DARWIN_SDK="+sdk,
 			)
@@ -280,6 +293,26 @@ func envInit() (err error) {
 	}
 
 	return nil
+}
+
+// iosSimWgpuLib returns the absolute path to the arm64 iOS-simulator build of
+// libwgpu_native.a vendored in the mobile fork, or "" if it cannot be located.
+// The cogentcore/webgpu binding omits this slice, so iossimulator builds on
+// Apple Silicon must link a simulator-targeted wgpu-native we supply ourselves.
+func iosSimWgpuLib() string {
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", "vortex.studio/mobile").Output()
+	if err != nil {
+		return ""
+	}
+	dir := strings.TrimSpace(string(out))
+	if dir == "" {
+		return ""
+	}
+	lib := filepath.Join(dir, "wgpunative", "iossimulator", "arm64", "libwgpu_native.a")
+	if _, err := os.Stat(lib); err != nil {
+		return ""
+	}
+	return lib
 }
 
 // abi maps GOARCH values to Android ABI strings.
