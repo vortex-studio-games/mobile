@@ -108,8 +108,16 @@ func goAppleBuild(pkg *packages.Package, bundleID string, targets []targetInfo) 
 
 		path := filepath.Join(tmpdir, t.platform, t.arch)
 
-		// Disable DWARF; see golang.org/issues/25148.
-		if err := goBuild(src, appleEnv[t.String()], "-ldflags=-w", "-o="+path); err != nil {
+		// Disable DWARF (golang.org/issues/25148) AND preserve the user's
+		// -ldflags. goCmdAt auto-appends -ldflags=<buildLdflags>, so passing a
+		// bare -ldflags=-w here would come last and clobber it (dropping e.g.
+		// -X main.var=... injections). Fold both into one -ldflags so the
+		// winning (last) value carries -w and the user's flags.
+		ldflags := "-w"
+		if buildLdflags != "" {
+			ldflags += " " + buildLdflags
+		}
+		if err := goBuild(src, appleEnv[t.String()], "-ldflags="+ldflags, "-o="+path); err != nil {
 			return nil, err
 		}
 		if nmpkgs == nil {
