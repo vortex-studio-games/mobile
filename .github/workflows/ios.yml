@@ -48,6 +48,10 @@ jobs:
           "$WS/mobile/gomobile" build -target=iossimulator -bundleid "$BUNDLE_ID" -o "$OUT/enjinspike.app" .
 
       - name: Boot simulator, launch, screenshot
+        env:
+          # Adaptive wait: poll for the spike's surface-config marker (up to 90s)
+          # rather than a fixed sleep — robust to a cold sim / busy host.
+          RENDER_MARKER: "surface configured"
         run: |
           "$WS/enjin/tools/scripts/ios-sim-run.sh" "$OUT/enjinspike.app" "$BUNDLE_ID" "$OUT"
 
