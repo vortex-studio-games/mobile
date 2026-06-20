@@ -1,5 +1,22 @@
 # Go support for Mobile devices
 
+> **Fork: `vortex.studio/mobile` — WebGPU/wgpu app layer.**
+> This fork rewrites the `app` package's native rendering surface to drive a
+> **WebGPU (wgpu) surface** instead of OpenGL ES, for both mobile platforms:
+> - **Android** (`android_wgpu.go`): exposes the raw `ANativeWindow` (no EGL) so
+>   the engine creates a Vulkan wgpu surface from it.
+> - **iOS** (`darwin_ios.{go,m}`, `darwin_ios_wgpu.go`): the `UIView`'s backing
+>   layer is a `CAMetalLayer`; its pointer is handed to Go via `setMetalLayer`,
+>   and the engine creates a Metal wgpu surface from it. The GLES/`GLKView`/
+>   `EAGLContext` path is removed (the engine never used GLES on iOS).
+>
+> **Consequence:** the upstream GL examples (e.g. `example/ivy/ios`, the GL
+> `app` demos) no longer build for Android/iOS — this is intentional, to avoid
+> maintaining a dual GL/WebGPU app layer. `cmd/gomobile` also gained: unsigned
+> iOS-simulator builds, GLES3 headers on iOS, an arm64 iOS-simulator
+> `libwgpu_native.a` slice (`wgpunative/`), and `-ldflags` pass-through for
+> Apple builds. See `example/enjin-wgpu-ios/` for the iOS render spike.
+
 [![Go Reference](https://pkg.go.dev/badge/golang.org/x/mobile.svg)](https://pkg.go.dev/golang.org/x/mobile)
 
 The Go mobile repository holds packages and build tools for using Go on mobile platforms.

@@ -61,7 +61,17 @@ struct utsname sysInfo;
 	lifecycleVisible();
 }
 
+- (void)applicationWillEnterForeground:(UIApplication *)application {
+	// Coming back from background: re-deliver the (possibly resized) CAMetalLayer
+	// so the engine rebuilds its wgpu surface before it resumes rendering.
+	[self.controller updateDrawableSizeAndNotify];
+}
+
 - (void)applicationDidEnterBackground:(UIApplication *)application {
+	// The CAMetalLayer's drawable is invalid while backgrounded; hand Go a NULL
+	// layer so the engine releases its surface and stops rendering to a dead
+	// drawable (which the iOS watchdog can kill). It is recreated on foreground.
+	setMetalLayer(NULL);
 	lifecycleAlive();
 }
 
