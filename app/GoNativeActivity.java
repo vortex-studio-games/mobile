@@ -10,6 +10,8 @@ import android.os.Bundle;
 import android.util.Log;
 import android.view.KeyCharacterMap;
 import android.view.View;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 
@@ -82,7 +84,37 @@ public class GoNativeActivity extends NativeActivity {
 			WindowManager.LayoutParams params = getWindow().getAttributes();
 			params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
 			getWindow().setAttributes(params);
-			Log.i("Go", "Display cutout mode set to SHORT_EDGES");
+		}
+
+		// Go truly fullscreen: draw edge-to-edge and hide the status + navigation
+		// bars (immersive). Re-applied on every focus gain (they transiently show
+		// on a swipe from the edge).
+		if (Build.VERSION.SDK_INT >= 30) {
+			getWindow().setDecorFitsSystemWindows(false);
+		}
+		hideSystemBars();
+	}
+
+	// hideSystemBars hides the status and navigation bars in immersive-sticky
+	// mode, so the app owns the whole screen and the bars only reappear
+	// transiently on an edge swipe.
+	private void hideSystemBars() {
+		View decorView = getWindow().getDecorView();
+		if (Build.VERSION.SDK_INT >= 30) {
+			WindowInsetsController controller = decorView.getWindowInsetsController();
+			if (controller != null) {
+				controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+				controller.setSystemBarsBehavior(
+						WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+			}
+		} else {
+			decorView.setSystemUiVisibility(
+					View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+							| View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+							| View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+							| View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+							| View.SYSTEM_UI_FLAG_FULLSCREEN
+							| View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
 		}
 	}
 
@@ -90,6 +122,7 @@ public class GoNativeActivity extends NativeActivity {
 	public void onWindowFocusChanged(boolean hasFocus) {
 		super.onWindowFocusChanged(hasFocus);
 		if (hasFocus) {
+			hideSystemBars();
 			// Belt-and-suspenders: explicitly dismiss the IME on every focus
 			// gain. STATE_ALWAYS_HIDDEN alone isn't enough on some devices
 			// where the IME has been brought up by a prior activity instance.
