@@ -87,12 +87,22 @@ func gendex() error {
 	if err != nil {
 		return err
 	}
+	// dx was removed after build-tools 30; use d8, which takes the compiled
+	// .class files (including the anonymous-class $N files) and emits classes.dex.
+	classFiles, err := filepath.Glob(tmpdir + "/work/org/golang/app/*.class")
+	if err != nil {
+		return err
+	}
+	if len(classFiles) == 0 {
+		return errors.New("gendex: no compiled .class files found")
+	}
 	cmd = exec.Command(
-		buildTools+"/dx",
-		"--dex",
-		"--output="+tmpdir+"/classes.dex",
-		tmpdir+"/work",
+		buildTools+"/d8",
+		"--min-api", "21",
+		"--lib", platform+"/android.jar",
+		"--output", tmpdir,
 	)
+	cmd.Args = append(cmd.Args, classFiles...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		os.Stderr.Write(out)
 		return err
