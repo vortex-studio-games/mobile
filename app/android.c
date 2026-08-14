@@ -49,6 +49,7 @@ static jmethodID find_static_method(JNIEnv *env, jclass clazz, const char *name,
 }
 
 static jmethodID key_rune_method;
+static jmethodID ime_inset_method;
 static jmethodID show_soft_keyboard_method;
 static jmethodID hide_soft_keyboard_method;
 static jobject current_activity;
@@ -80,6 +81,7 @@ void ANativeActivity_onCreate(ANativeActivity *activity, void* savedState, size_
 		current_class = (*env)->GetObjectClass(env, activity->clazz);
 		current_class = (*env)->NewGlobalRef(env, current_class);
 		key_rune_method = find_static_method(env, current_class, "getRune", "(III)I");
+		ime_inset_method = find_static_method(env, current_class, "getImeInset", "()I");
 		show_soft_keyboard_method = find_method(env, current_class, "showSoftKeyboard", "()V");
 		hide_soft_keyboard_method = find_method(env, current_class, "hideSoftKeyboard", "()V");
 		current_activity = (*env)->NewGlobalRef(env, activity->clazz);
@@ -125,6 +127,11 @@ void ANativeActivity_onCreate(ANativeActivity *activity, void* savedState, size_
 	activity->callbacks->onLowMemory = onLowMemory;
 
 	onCreate(activity);
+}
+
+// getImeInset returns how many pixels of the window the keyboard covers.
+int32_t getImeInset(JNIEnv* env) {
+	return (int32_t)(*env)->CallStaticIntMethod(env, current_class, ime_inset_method);
 }
 
 int32_t getKeyRune(JNIEnv* env, AInputEvent* e) {

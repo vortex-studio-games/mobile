@@ -70,14 +70,19 @@ public class GoNativeActivity extends NativeActivity {
 		load();
 		super.onCreate(savedInstanceState);
 
-		// Force the soft keyboard hidden on every window focus. Without this
-		// the IME can show on its own (some devices auto-show on launch even
-		// though the GLSurfaceView has no editable text field).
-		// showSoftKeyboard() forces the IME up via toggleSoftInput(SHOW_FORCED),
-		// which overrides this flag when text input is genuinely needed.
+		// Start with the IME hidden: some devices auto-show one on launch even
+		// though a native surface has no editable field. showSoftKeyboard()
+		// overrides this when text input is genuinely needed.
+		//
+		// ADJUST_NOTHING is deliberate, and it is why android:windowSoftInputMode
+		// in a manifest has no effect here. A NativeActivity's surface is not
+		// resized for the IME anyway; letting the window try would resize the
+		// swapchain on every keyboard toggle. The app is told the inset instead
+		// (getImeInset) and keeps its own content clear of it.
 		getWindow().setSoftInputMode(
 				WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
 						| WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
+		watchImeInsets();
 
 		// Enable rendering into display cutout area (notch) for API 28+
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -118,9 +123,38 @@ public class GoNativeActivity extends NativeActivity {
 		}
 	}
 
+	// imeInsetPx is how much of the window the keyboard currently covers.
+	//
+	// A NativeActivity is not resized when the IME appears: the system reports it as
+	// an inset and leaves the surface alone. That is the right shape for a GPU
+	// surface — resizing a swapchain on every keyboard toggle is expensive — but it
+	// means the app has to keep its own content clear of the covered strip, and it
+	// cannot do that without being told how tall the strip is.
+	private static int imeInsetPx = 0;
+
+	// getImeInset is read from native through JNI; see getImeInset in android.c.
+	static int getImeInset() {
+		return imeInsetPx;
+	}
+
 	// keyboardWanted tracks whether the app has asked for the IME, so the
 	// lifecycle hides below do not fight a request the app has already made.
 	private static boolean keyboardWanted = false;
+
+	// watchImeInsets keeps imeInsetPx current. Registered once, in onCreate.
+	private void watchImeInsets() {
+		if (Build.VERSION.SDK_INT < 30) {
+			return;
+		}
+		getWindow().getDecorView().setOnApplyWindowInsetsListener(
+				new View.OnApplyWindowInsetsListener() {
+					@Override
+					public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
+						imeInsetPx = insets.getInsets(WindowInsets.Type.ime()).bottom;
+						return v.onApplyWindowInsets(insets);
+					}
+				});
+	}
 
 	@Override
 	public void onWindowFocusChanged(boolean hasFocus) {

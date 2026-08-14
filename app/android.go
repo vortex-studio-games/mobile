@@ -35,6 +35,7 @@ package app
 #include <stdlib.h>
 
 int32_t getKeyRune(JNIEnv* env, AInputEvent* e);
+int32_t getImeInset(JNIEnv* env);
 void showSoftKeyboard(JNIEnv* env);
 void hideSoftKeyboard(JNIEnv* env);
 */
@@ -71,6 +72,22 @@ func ShowSoftKeyboard() {
 		C.showSoftKeyboard((*C.JNIEnv)(unsafe.Pointer(env)))
 		return nil
 	})
+}
+
+// IMEInsetPx returns how many pixels of the window the soft keyboard currently
+// covers, or 0 when none is showing.
+//
+// A NativeActivity is not resized for the IME — the system reports it as an inset and
+// leaves the surface alone, which is what a GPU surface wants. The cost is that an app
+// has to keep its own content out of the covered strip, and this is how it learns how
+// tall that strip is.
+func IMEInsetPx() int {
+	var inset int
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		inset = int(C.getImeInset((*C.JNIEnv)(unsafe.Pointer(env))))
+		return nil
+	})
+	return inset
 }
 
 // HideSoftKeyboard hides the Android soft keyboard.

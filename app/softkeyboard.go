@@ -17,3 +17,6 @@ func ShowSoftKeyboard() {
 func HideSoftKeyboard() {
 	// No-op on desktop/iOS
 }
+
+// IMEInsetPx is 0 off Android: no other host reports a keyboard inset.
+func IMEInsetPx() int { return 0 }
