@@ -118,11 +118,19 @@ public class GoNativeActivity extends NativeActivity {
 		}
 	}
 
+	// keyboardWanted tracks whether the app has asked for the IME, so the
+	// lifecycle hides below do not fight a request the app has already made.
+	private static boolean keyboardWanted = false;
+
 	@Override
 	public void onWindowFocusChanged(boolean hasFocus) {
 		super.onWindowFocusChanged(hasFocus);
 		if (hasFocus) {
 			hideSystemBars();
+			if (keyboardWanted) {
+				showSoftKeyboard();
+				return;
+			}
 			// Belt-and-suspenders: explicitly dismiss the IME on every focus
 			// gain. STATE_ALWAYS_HIDDEN alone isn't enough on some devices
 			// where the IME has been brought up by a prior activity instance.
@@ -160,22 +168,32 @@ public class GoNativeActivity extends NativeActivity {
 
 	// Show the soft keyboard
 	void showSoftKeyboard() {
+		keyboardWanted = true;
 		runOnUiThread(new Runnable() {
 			@Override
 			public void run() {
 				try {
+					// The window has to be able to take focus before anything
+					// will show a keyboard over it.
+					View decorView = getWindow().getDecorView();
+					decorView.setFocusable(true);
+					decorView.setFocusableInTouchMode(true);
+					decorView.requestFocus();
+
+					// API 30+ is the supported path. toggleSoftInput with
+					// SHOW_FORCED, which this used to call, is deprecated and
+					// does nothing at all on recent releases — the request was
+					// made and logged, and no keyboard ever appeared.
+					WindowInsetsController ctrl = decorView.getWindowInsetsController();
+					if (Build.VERSION.SDK_INT >= 30 && ctrl != null) {
+						ctrl.show(WindowInsets.Type.ime());
+						Log.i("Go", "showSoftKeyboard: WindowInsetsController.show(ime)");
+						return;
+					}
 					InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
 					if (imm != null) {
-						// For NativeActivity, we need to use toggleSoftInput with SHOW_FORCED
-						// First, try to ensure the window can receive input
-						View decorView = getWindow().getDecorView();
-						decorView.setFocusable(true);
-						decorView.setFocusableInTouchMode(true);
-						decorView.requestFocus();
-
-						// Use toggleSoftInput which works more reliably with NativeActivity
-						imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, InputMethodManager.HIDE_IMPLICIT_ONLY);
-						Log.i("Go", "showSoftKeyboard: toggleSoftInput called");
+						imm.showSoftInput(decorView, InputMethodManager.SHOW_IMPLICIT);
+						Log.i("Go", "showSoftKeyboard: showSoftInput called");
 					}
 				} catch (Exception e) {
 					Log.e("Go", "showSoftKeyboard failed", e);
@@ -186,6 +204,7 @@ public class GoNativeActivity extends NativeActivity {
 
 	// Hide the soft keyboard
 	void hideSoftKeyboard() {
+		keyboardWanted = false;
 		runOnUiThread(new Runnable() {
 			@Override
 			public void run() {
