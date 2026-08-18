@@ -36,6 +36,8 @@ package app
 
 int32_t getKeyRune(JNIEnv* env, AInputEvent* e);
 int32_t getImeInset(JNIEnv* env);
+int32_t getBackPressed(JNIEnv* env);
+void finishActivity(JNIEnv* env);
 void showSoftKeyboard(JNIEnv* env);
 void hideSoftKeyboard(JNIEnv* env);
 */
@@ -70,6 +72,30 @@ func RunOnJVM(fn func(vm, jniEnv, ctx uintptr) error) error {
 func ShowSoftKeyboard() {
 	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
 		C.showSoftKeyboard((*C.JNIEnv)(unsafe.Pointer(env)))
+		return nil
+	})
+}
+
+// BackPressed reports whether the system back button or gesture was used since the
+// last call, and consumes it.
+//
+// The activity keeps the press rather than finishing on it, so an application with
+// screens of its own can go back one instead of closing. An application that collects
+// these must also call Finish when it has nowhere left to go, or back stops working at
+// the top level.
+func BackPressed() bool {
+	var pressed bool
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		pressed = C.getBackPressed((*C.JNIEnv)(unsafe.Pointer(env))) != 0
+		return nil
+	})
+	return pressed
+}
+
+// Finish leaves the app, for a back press with nothing left to pop.
+func Finish() {
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		C.finishActivity((*C.JNIEnv)(unsafe.Pointer(env)))
 		return nil
 	})
 }

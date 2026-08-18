@@ -123,6 +123,37 @@ public class GoNativeActivity extends NativeActivity {
 		}
 	}
 
+	// backPressed latches a press of the system back button or gesture.
+	//
+	// A NativeActivity finishes on back by default, which for an app with screens of
+	// its own means the whole thing closes instead of going back one. The activity
+	// keeps the press instead and Go collects it; if the app has nothing left to go
+	// back to it calls finishActivity, so back still leaves at the top level.
+	private static boolean backPressed = false;
+
+	static boolean getBackPressed() {
+		boolean v = backPressed;
+		backPressed = false;
+		return v;
+	}
+
+	@Override
+	public void onBackPressed() {
+		// Deliberately not calling super: that is what finishes the activity.
+		backPressed = true;
+	}
+
+	// finishActivity leaves the app, for when Go decides the back press has nowhere
+	// left to go.
+	void finishActivity() {
+		runOnUiThread(new Runnable() {
+			@Override
+			public void run() {
+				finish();
+			}
+		});
+	}
+
 	// imeInsetPx is how much of the window the keyboard currently covers.
 	//
 	// A NativeActivity is not resized when the IME appears: the system reports it as

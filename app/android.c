@@ -50,6 +50,8 @@ static jmethodID find_static_method(JNIEnv *env, jclass clazz, const char *name,
 
 static jmethodID key_rune_method;
 static jmethodID ime_inset_method;
+static jmethodID back_pressed_method;
+static jmethodID finish_activity_method;
 static jmethodID show_soft_keyboard_method;
 static jmethodID hide_soft_keyboard_method;
 static jobject current_activity;
@@ -82,6 +84,8 @@ void ANativeActivity_onCreate(ANativeActivity *activity, void* savedState, size_
 		current_class = (*env)->NewGlobalRef(env, current_class);
 		key_rune_method = find_static_method(env, current_class, "getRune", "(III)I");
 		ime_inset_method = find_static_method(env, current_class, "getImeInset", "()I");
+		back_pressed_method = find_static_method(env, current_class, "getBackPressed", "()Z");
+		finish_activity_method = find_method(env, current_class, "finishActivity", "()V");
 		show_soft_keyboard_method = find_method(env, current_class, "showSoftKeyboard", "()V");
 		hide_soft_keyboard_method = find_method(env, current_class, "hideSoftKeyboard", "()V");
 		current_activity = (*env)->NewGlobalRef(env, activity->clazz);
@@ -127,6 +131,16 @@ void ANativeActivity_onCreate(ANativeActivity *activity, void* savedState, size_
 	activity->callbacks->onLowMemory = onLowMemory;
 
 	onCreate(activity);
+}
+
+// getBackPressed reports whether the back button was pressed since the last call.
+int32_t getBackPressed(JNIEnv* env) {
+	return (int32_t)(*env)->CallStaticBooleanMethod(env, current_class, back_pressed_method);
+}
+
+// finishActivity leaves the app.
+void finishActivity(JNIEnv* env) {
+	(*env)->CallVoidMethod(env, current_activity, finish_activity_method);
 }
 
 // getImeInset returns how many pixels of the window the keyboard covers.

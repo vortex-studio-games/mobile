@@ -20,3 +20,9 @@ func HideSoftKeyboard() {
 
 // IMEInsetPx is 0 off Android: no other host reports a keyboard inset.
 func IMEInsetPx() int { return 0 }
+
+// BackPressed is always false off Android: no other host has a system back button.
+func BackPressed() bool { return false }
+
+// Finish is a no-op off Android.
+func Finish() {}
