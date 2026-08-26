@@ -56,6 +56,12 @@ static jmethodID bio_state_method;
 static jmethodID bio_available_method;
 static jmethodID bio_start_method;
 static jmethodID bio_cancel_method;
+static jmethodID bio_fp_method;
+static jmethodID bio_has_method;
+static jmethodID bio_forget_method;
+static jmethodID bio_take_method;
+static jmethodID bio_enroll_method;
+static jmethodID bio_unlock_method;
 static jmethodID get_clipboard_method;
 static jmethodID finish_activity_method;
 static jmethodID show_soft_keyboard_method;
@@ -97,6 +103,14 @@ void ANativeActivity_onCreate(ANativeActivity *activity, void* savedState, size_
 		bio_start_method = find_static_method(env, current_class, "startBiometric",
 			"(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
 		bio_cancel_method = find_static_method(env, current_class, "cancelBiometric", "()V");
+		bio_fp_method = find_static_method(env, current_class, "fingerprintAvailable", "()Z");
+		bio_has_method = find_static_method(env, current_class, "bioHasSecret", "()Z");
+		bio_forget_method = find_static_method(env, current_class, "bioForget", "()V");
+		bio_take_method = find_static_method(env, current_class, "bioTakeSecret", "()Ljava/lang/String;");
+		bio_enroll_method = find_static_method(env, current_class, "bioEnroll",
+			"(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
+		bio_unlock_method = find_static_method(env, current_class, "bioUnlock",
+			"(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
 		get_clipboard_method = find_static_method(env, current_class, "getClipboard", "()Ljava/lang/String;");
 		finish_activity_method = find_method(env, current_class, "finishActivity", "()V");
 		show_soft_keyboard_method = find_method(env, current_class, "showSoftKeyboard", "()V");
@@ -144,6 +158,52 @@ void ANativeActivity_onCreate(ANativeActivity *activity, void* savedState, size_
 	activity->callbacks->onLowMemory = onLowMemory;
 
 	onCreate(activity);
+}
+
+int32_t fingerprintAvailable(JNIEnv* env) {
+	return (int32_t)(*env)->CallStaticBooleanMethod(env, current_class, bio_fp_method);
+}
+
+int32_t bioHasSecret(JNIEnv* env) {
+	return (int32_t)(*env)->CallStaticBooleanMethod(env, current_class, bio_has_method);
+}
+
+void bioForget(JNIEnv* env) {
+	(*env)->CallStaticVoidMethod(env, current_class, bio_forget_method);
+}
+
+char* bioTakeSecret(JNIEnv* env) {
+	jstring s = (jstring)(*env)->CallStaticObjectMethod(env, current_class, bio_take_method);
+	if (s == NULL) {
+		return NULL;
+	}
+	const char* chars = (*env)->GetStringUTFChars(env, s, NULL);
+	char* out = strdup(chars);
+	(*env)->ReleaseStringUTFChars(env, s, chars);
+	(*env)->DeleteLocalRef(env, s);
+	return out;
+}
+
+void bioEnroll(JNIEnv* env, const char* t, const char* sub, const char* c, const char* secret) {
+	jstring jt = (*env)->NewStringUTF(env, t);
+	jstring js = (*env)->NewStringUTF(env, sub);
+	jstring jc = (*env)->NewStringUTF(env, c);
+	jstring jx = (*env)->NewStringUTF(env, secret);
+	(*env)->CallStaticVoidMethod(env, current_class, bio_enroll_method, jt, js, jc, jx);
+	(*env)->DeleteLocalRef(env, jt);
+	(*env)->DeleteLocalRef(env, js);
+	(*env)->DeleteLocalRef(env, jc);
+	(*env)->DeleteLocalRef(env, jx);
+}
+
+void bioUnlock(JNIEnv* env, const char* t, const char* sub, const char* c) {
+	jstring jt = (*env)->NewStringUTF(env, t);
+	jstring js = (*env)->NewStringUTF(env, sub);
+	jstring jc = (*env)->NewStringUTF(env, c);
+	(*env)->CallStaticVoidMethod(env, current_class, bio_unlock_method, jt, js, jc);
+	(*env)->DeleteLocalRef(env, jt);
+	(*env)->DeleteLocalRef(env, js);
+	(*env)->DeleteLocalRef(env, jc);
 }
 
 // biometricAvailable reports whether a prompt can be raised right now.

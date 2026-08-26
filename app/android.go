@@ -43,6 +43,12 @@ int32_t biometricAvailable(JNIEnv* env);
 int32_t biometricState(JNIEnv* env);
 void startBiometric(JNIEnv* env, const char* title, const char* subtitle, const char* cancel);
 void cancelBiometric(JNIEnv* env);
+int32_t fingerprintAvailable(JNIEnv* env);
+int32_t bioHasSecret(JNIEnv* env);
+void bioForget(JNIEnv* env);
+char* bioTakeSecret(JNIEnv* env);
+void bioEnroll(JNIEnv* env, const char* t, const char* sub, const char* c, const char* secret);
+void bioUnlock(JNIEnv* env, const char* t, const char* sub, const char* c);
 char* getClipboard(JNIEnv* env);
 void finishActivity(JNIEnv* env);
 void showSoftKeyboard(JNIEnv* env);
@@ -91,6 +97,78 @@ const (
 	BioFailed
 	BioUnsupported
 )
+
+// FingerprintAvailable reports whether this device has a fingerprint sensor that can
+// currently authenticate.
+//
+// It gates the affordance, not the prompt: BiometricPrompt has no fingerprint-only
+// selector, and on hardware where face unlock is also Class 3 — Pixel 8 and 9 — a
+// strong prompt accepts either. Everything it accepts is hardware-backed.
+func FingerprintAvailable() bool {
+	var ok bool
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		ok = C.fingerprintAvailable((*C.JNIEnv)(unsafe.Pointer(env))) != 0
+		return nil
+	})
+	return ok
+}
+
+// BioHasSecret reports whether a secret is already wrapped on this device.
+func BioHasSecret() bool {
+	var ok bool
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		ok = C.bioHasSecret((*C.JNIEnv)(unsafe.Pointer(env))) != 0
+		return nil
+	})
+	return ok
+}
+
+// BioForget destroys the wrapped secret and the Keystore key that opens it.
+func BioForget() {
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		C.bioForget((*C.JNIEnv)(unsafe.Pointer(env)))
+		return nil
+	})
+}
+
+// BioTakeSecret collects the unwrapped secret, base64, exactly once.
+func BioTakeSecret() string {
+	var out string
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		c := C.bioTakeSecret((*C.JNIEnv)(unsafe.Pointer(env)))
+		if c != nil {
+			out = C.GoString(c)
+			C.free(unsafe.Pointer(c))
+		}
+		return nil
+	})
+	return out
+}
+
+// BioEnroll wraps a secret behind a prompt. The outcome arrives via BiometricState.
+func BioEnroll(title, subtitle, cancel, base64Secret string) {
+	ct, cs, cc, cx := C.CString(title), C.CString(subtitle), C.CString(cancel), C.CString(base64Secret)
+	defer C.free(unsafe.Pointer(ct))
+	defer C.free(unsafe.Pointer(cs))
+	defer C.free(unsafe.Pointer(cc))
+	defer C.free(unsafe.Pointer(cx))
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		C.bioEnroll((*C.JNIEnv)(unsafe.Pointer(env)), ct, cs, cc, cx)
+		return nil
+	})
+}
+
+// BioUnlock unwraps it behind a prompt. Collect with BioTakeSecret on success.
+func BioUnlock(title, subtitle, cancel string) {
+	ct, cs, cc := C.CString(title), C.CString(subtitle), C.CString(cancel)
+	defer C.free(unsafe.Pointer(ct))
+	defer C.free(unsafe.Pointer(cs))
+	defer C.free(unsafe.Pointer(cc))
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		C.bioUnlock((*C.JNIEnv)(unsafe.Pointer(env)), ct, cs, cc)
+		return nil
+	})
+}
 
 // BiometricAvailable reports hardware present, enrolled, and not locked out.
 func BiometricAvailable() bool {

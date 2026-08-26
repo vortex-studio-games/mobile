@@ -10,6 +10,16 @@ import android.content.pm.PackageManager;
 import android.hardware.biometrics.BiometricPrompt;
 import android.hardware.biometrics.BiometricManager;
 import android.os.CancellationSignal;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
+import android.util.Base64;
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
@@ -151,6 +161,33 @@ public class GoNativeActivity extends NativeActivity {
 		return bioState;
 	}
 
+	// fingerprintAvailable narrows biometricAvailable to devices with a fingerprint
+	// sensor.
+	//
+	// It gates availability, not the prompt. BiometricPrompt has no fingerprint-only
+	// selector: setAllowedAuthenticators takes a strength class, and on hardware where
+	// face unlock is also Class 3 — Pixel 8 and 9, among others — a strong prompt will
+	// accept a face as readily as a finger. Where face is Class 1, which is most other
+	// hardware, it is excluded anyway because a weak authenticator cannot unlock a
+	// Keystore key.
+	//
+	// So this answers "does this device have a fingerprint reader", which is what a
+	// caller offering a fingerprint affordance needs to know. What the OS then accepts
+	// at the prompt is the OS's to decide, and every authenticator it will accept is
+	// hardware-backed and strong.
+	static boolean fingerprintAvailable() {
+		try {
+			PackageManager pm = goNativeActivity.getPackageManager();
+			if (pm == null || !pm.hasSystemFeature(PackageManager.FEATURE_FINGERPRINT)) {
+				return false;
+			}
+			return biometricAvailable();
+		} catch (Exception e) {
+			Log.e("Go", "fingerprintAvailable failed", e);
+			return false;
+		}
+	}
+
 	// biometricAvailable reports hardware present, enrolled, and not locked out.
 	static boolean biometricAvailable() {
 		try {
@@ -159,7 +196,17 @@ public class GoNativeActivity extends NativeActivity {
 			}
 			BiometricManager bm = (BiometricManager)
 					goNativeActivity.getSystemService(Context.BIOMETRIC_SERVICE);
-			return bm != null && bm.canAuthenticate() == BiometricManager.BIOMETRIC_SUCCESS;
+			if (bm == null) {
+				return false;
+			}
+			int code = bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG);
+			if (code != BiometricManager.BIOMETRIC_SUCCESS) {
+				// Worth naming: "no strong biometric" and "none enrolled yet" look
+				// identical from the outside and mean very different things.
+				Log.i("Go", "biometricAvailable: canAuthenticate=" + code
+						+ " (0 ok, 1 unavailable, 11 none enrolled, 12 no hardware)");
+			}
+			return code == BiometricManager.BIOMETRIC_SUCCESS;
 		} catch (Exception e) {
 			Log.e("Go", "biometricAvailable failed", e);
 			return false;
@@ -225,6 +272,212 @@ public class GoNativeActivity extends NativeActivity {
 			Log.e("Go", "cancelBiometric failed", e);
 		}
 		bioState = BIO_FAILED;
+	}
+
+	// ---- biometric-wrapped secret ----
+	//
+	// A biometric prompt authenticates a person; it does not produce a key. To open
+	// the vault without the passphrase, something has to hold key material across
+	// launches and release it only to that person — which is the Keystore's job, not
+	// a boolean this code could check and then choose to trust.
+	//
+	// The key is generated with setUserAuthenticationRequired, so every use of the
+	// cipher has to be authorised by a prompt, and the prompt is given the Cipher as
+	// a CryptoObject rather than being asked and believed. Patching out the check
+	// gains an attacker nothing: the key is in hardware and will not perform the
+	// operation unauthenticated.
+	//
+	// setInvalidatedByBiometricEnrollment means adding a new finger or face destroys
+	// the key. The wrapped secret becomes unreadable and the app falls back to the
+	// passphrase, which is the correct outcome: a new enrolment is a new person as
+	// far as this is concerned.
+	private static final String BIO_KEY = "boo-bio-dek";
+	private static final String BIO_FILE = "boo-bio.bin";
+
+	private static String bioSecret;      // base64, held only between success and collection
+	private static byte[] bioPlainForWrap; // what enrol is waiting to encrypt
+
+	static boolean bioHasSecret() {
+		try {
+			return new File(goNativeActivity.getFilesDir(), BIO_FILE).exists();
+		} catch (Exception e) {
+			return false;
+		}
+	}
+
+	static void bioForget() {
+		try {
+			new File(goNativeActivity.getFilesDir(), BIO_FILE).delete();
+			KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
+			ks.load(null);
+			ks.deleteEntry(BIO_KEY);
+		} catch (Exception e) {
+			Log.e("Go", "bioForget failed", e);
+		}
+	}
+
+	// bioTakeSecret hands over the unwrapped secret exactly once.
+	static String bioTakeSecret() {
+		String s = bioSecret;
+		bioSecret = null;
+		return s == null ? "" : s;
+	}
+
+	private static SecretKey bioKey(boolean create) throws Exception {
+		KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
+		ks.load(null);
+		SecretKey k = (SecretKey) ks.getKey(BIO_KEY, null);
+		if (k != null || !create) {
+			return k;
+		}
+		KeyGenerator g = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+		KeyGenParameterSpec.Builder b = new KeyGenParameterSpec.Builder(BIO_KEY,
+				KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+				.setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+				.setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+				.setUserAuthenticationRequired(true)
+				.setInvalidatedByBiometricEnrollment(true);
+		g.init(b.build());
+		return g.generateKey();
+	}
+
+	// bioEnroll wraps a secret behind the prompt. base64 in, nothing out.
+	static void bioEnroll(final String title, final String subtitle, final String cancel,
+			final String base64Secret) {
+		bioState = BIO_PENDING;
+		bioPlainForWrap = Base64.decode(base64Secret, Base64.NO_WRAP);
+		goNativeActivity.runOnUiThread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
+					c.init(Cipher.ENCRYPT_MODE, bioKey(true));
+					promptWithCipher(title, subtitle, cancel, c, true);
+				} catch (Exception e) {
+					Log.e("Go", "bioEnroll failed", e);
+					bioState = BIO_UNSUPPORTED;
+				}
+			}
+		});
+	}
+
+	// bioUnlock unwraps it behind the prompt.
+	static void bioUnlock(final String title, final String subtitle, final String cancel) {
+		bioState = BIO_PENDING;
+		goNativeActivity.runOnUiThread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					byte[] blob = readAll(new File(goNativeActivity.getFilesDir(), BIO_FILE));
+					if (blob == null || blob.length < 13) {
+						bioState = BIO_UNSUPPORTED;
+						return;
+					}
+					int ivLen = blob[0] & 0xff;
+					byte[] iv = new byte[ivLen];
+					System.arraycopy(blob, 1, iv, 0, ivLen);
+					byte[] ct = new byte[blob.length - 1 - ivLen];
+					System.arraycopy(blob, 1 + ivLen, ct, 0, ct.length);
+
+					SecretKey k = bioKey(false);
+					if (k == null) {
+						bioState = BIO_UNSUPPORTED;
+						return;
+					}
+					Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
+					c.init(Cipher.DECRYPT_MODE, k, new GCMParameterSpec(128, iv));
+					bioPendingCipherText = ct;
+					promptWithCipher(title, subtitle, cancel, c, false);
+				} catch (Exception e) {
+					// A destroyed key lands here: a new enrolment invalidated it, and
+					// the passphrase is the way in.
+					Log.e("Go", "bioUnlock failed", e);
+					bioState = BIO_UNSUPPORTED;
+				}
+			}
+		});
+	}
+
+	private static byte[] bioPendingCipherText;
+
+	private static void promptWithCipher(String title, String subtitle, String cancel,
+			final Cipher cipher, final boolean wrapping) {
+		bioCancel = new CancellationSignal();
+		BiometricPrompt.Builder b = new BiometricPrompt.Builder(goNativeActivity)
+				.setTitle(title == null ? "" : title)
+				// Strong only. A Keystore key with setUserAuthenticationRequired can
+				// only be unlocked by a Class 3 authenticator, so asking for anything
+				// less would raise a prompt that cannot finish the job.
+				.setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+				.setNegativeButton(cancel == null || cancel.isEmpty() ? "Cancel" : cancel,
+						goNativeActivity.getMainExecutor(),
+						new android.content.DialogInterface.OnClickListener() {
+							@Override
+							public void onClick(android.content.DialogInterface d, int w) {
+								bioState = BIO_FAILED;
+							}
+						});
+		if (subtitle != null && !subtitle.isEmpty()) {
+			b.setSubtitle(subtitle);
+		}
+		b.build().authenticate(new BiometricPrompt.CryptoObject(cipher), bioCancel,
+				goNativeActivity.getMainExecutor(),
+				new BiometricPrompt.AuthenticationCallback() {
+					@Override
+					public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult r) {
+						try {
+							Cipher c = r.getCryptoObject().getCipher();
+							if (wrapping) {
+								byte[] iv = c.getIV();
+								byte[] ct = c.doFinal(bioPlainForWrap);
+								bioPlainForWrap = null;
+								byte[] out = new byte[1 + iv.length + ct.length];
+								out[0] = (byte) iv.length;
+								System.arraycopy(iv, 0, out, 1, iv.length);
+								System.arraycopy(ct, 0, out, 1 + iv.length, ct.length);
+								writeAll(new File(goNativeActivity.getFilesDir(), BIO_FILE), out);
+							} else {
+								byte[] plain = c.doFinal(bioPendingCipherText);
+								bioPendingCipherText = null;
+								bioSecret = Base64.encodeToString(plain, Base64.NO_WRAP);
+							}
+							bioState = BIO_OK;
+						} catch (Exception e) {
+							Log.e("Go", "biometric cipher failed", e);
+							bioState = BIO_FAILED;
+						}
+					}
+
+					@Override
+					public void onAuthenticationError(int code, CharSequence msg) {
+						bioState = BIO_FAILED;
+					}
+				});
+	}
+
+	private static byte[] readAll(File f) {
+		try (java.io.FileInputStream in = new java.io.FileInputStream(f)) {
+			byte[] out = new byte[(int) f.length()];
+			int n = 0;
+			while (n < out.length) {
+				int r = in.read(out, n, out.length - n);
+				if (r < 0) {
+					break;
+				}
+				n += r;
+			}
+			return out;
+		} catch (Exception e) {
+			return null;
+		}
+	}
+
+	private static void writeAll(File f, byte[] data) {
+		try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) {
+			out.write(data);
+		} catch (Exception e) {
+			Log.e("Go", "bio write failed", e);
+		}
 	}
 
 	// ---- clipboard ----
