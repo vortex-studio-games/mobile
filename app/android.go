@@ -44,6 +44,9 @@ int32_t biometricState(JNIEnv* env);
 void startBiometric(JNIEnv* env, const char* title, const char* subtitle, const char* cancel);
 void cancelBiometric(JNIEnv* env);
 int32_t fingerprintAvailable(JNIEnv* env);
+int32_t fingerprintHardware(JNIEnv* env);
+int32_t fingerprintNoneEnrolled(JNIEnv* env);
+void openBiometricEnroll(JNIEnv* env);
 int32_t bioHasSecret(JNIEnv* env);
 void bioForget(JNIEnv* env);
 char* bioTakeSecret(JNIEnv* env);
@@ -111,6 +114,40 @@ func FingerprintAvailable() bool {
 		return nil
 	})
 	return ok
+}
+
+// FingerprintHardware reports a sensor being present, enrolled or not.
+//
+// The affordance is gated on this rather than on FingerprintAvailable: a person who
+// has not set up a fingerprint yet still has the feature, one step away, and hiding it
+// from them is how a setting stays undiscovered.
+func FingerprintHardware() bool {
+	var ok bool
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		ok = C.fingerprintHardware((*C.JNIEnv)(unsafe.Pointer(env))) != 0
+		return nil
+	})
+	return ok
+}
+
+// FingerprintNoneEnrolled reports the sensor being present with nothing enrolled on it —
+// the one biometric failure the person can fix themselves.
+func FingerprintNoneEnrolled() bool {
+	var ok bool
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		ok = C.fingerprintNoneEnrolled((*C.JNIEnv)(unsafe.Pointer(env))) != 0
+		return nil
+	})
+	return ok
+}
+
+// OpenBiometricEnroll opens the system's enrolment screen. It returns as soon as the
+// intent is dispatched; the app is backgrounded until the person comes back.
+func OpenBiometricEnroll() {
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		C.openBiometricEnroll((*C.JNIEnv)(unsafe.Pointer(env)))
+		return nil
+	})
 }
 
 // BioHasSecret reports whether a secret is already wrapped on this device.

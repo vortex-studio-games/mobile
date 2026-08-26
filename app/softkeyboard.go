@@ -35,7 +35,10 @@ func GetClipboard() string { return "" }
 
 // The biometric-wrapped secret is Android-only; every other host in this package
 // reports nothing available and stores nothing.
-func FingerprintAvailable() bool { return false }
+func FingerprintAvailable() bool    { return false }
+func FingerprintHardware() bool     { return false }
+func FingerprintNoneEnrolled() bool { return false }
+func OpenBiometricEnroll()          {}
 
 func BioHasSecret() bool { return false }
 

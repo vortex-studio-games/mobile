@@ -213,6 +213,75 @@ public class GoNativeActivity extends NativeActivity {
 		}
 	}
 
+	// fingerprintHardware reports a sensor, whether or not anything is enrolled on it.
+	//
+	// This is the one that decides whether the app offers fingerprint unlock at all.
+	// Enrolment is the person's to do and can be done at any time, so a phone with a
+	// sensor and no finger on it is not a phone without the feature — it is a phone
+	// with one instruction standing in the way. Hiding the option there leaves no way
+	// to discover that instruction.
+	static boolean fingerprintHardware() {
+		try {
+			PackageManager pm = goNativeActivity.getPackageManager();
+			return pm != null && pm.hasSystemFeature(PackageManager.FEATURE_FINGERPRINT);
+		} catch (Exception e) {
+			Log.e("Go", "fingerprintHardware failed", e);
+			return false;
+		}
+	}
+
+	// fingerprintNoneEnrolled reports the sensor being present with nothing on it.
+	//
+	// Told apart from every other failure because it is the only one the person can
+	// fix, and the fix is somewhere else — see openBiometricEnroll.
+	static boolean fingerprintNoneEnrolled() {
+		try {
+			if (!fingerprintHardware() || Build.VERSION.SDK_INT < 29) {
+				return false;
+			}
+			BiometricManager bm = (BiometricManager)
+					goNativeActivity.getSystemService(Context.BIOMETRIC_SERVICE);
+			if (bm == null) {
+				return false;
+			}
+			return bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+					== BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED;
+		} catch (Exception e) {
+			Log.e("Go", "fingerprintNoneEnrolled failed", e);
+			return false;
+		}
+	}
+
+	// openBiometricEnroll sends the person to the system's own enrolment screen.
+	//
+	// ACTION_BIOMETRIC_ENROLL takes the authenticator class as an extra, so the screen
+	// it opens is the one that ends with a credential this app's Keystore key will
+	// accept. Enrolling a fingerprint invalidates any key already stored here, which is
+	// the intended behaviour and the reason the passphrase never stops working.
+	static void openBiometricEnroll() {
+		goNativeActivity.runOnUiThread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					android.content.Intent i;
+					if (Build.VERSION.SDK_INT >= 30) {
+						i = new android.content.Intent(
+								android.provider.Settings.ACTION_BIOMETRIC_ENROLL);
+						i.putExtra(android.provider.Settings
+										.EXTRA_BIOMETRIC_AUTHENTICATORS_ALLOWED,
+								BiometricManager.Authenticators.BIOMETRIC_STRONG);
+					} else {
+						i = new android.content.Intent(
+								android.provider.Settings.ACTION_SECURITY_SETTINGS);
+					}
+					goNativeActivity.startActivity(i);
+				} catch (Exception e) {
+					Log.e("Go", "openBiometricEnroll failed", e);
+				}
+			}
+		});
+	}
+
 	static void startBiometric(final String title, final String subtitle, final String cancel) {
 		bioState = BIO_PENDING;
 		goNativeActivity.runOnUiThread(new Runnable() {

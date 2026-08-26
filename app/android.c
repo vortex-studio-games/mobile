@@ -57,6 +57,9 @@ static jmethodID bio_available_method;
 static jmethodID bio_start_method;
 static jmethodID bio_cancel_method;
 static jmethodID bio_fp_method;
+static jmethodID bio_hw_method;
+static jmethodID bio_noenroll_method;
+static jmethodID bio_openenroll_method;
 static jmethodID bio_has_method;
 static jmethodID bio_forget_method;
 static jmethodID bio_take_method;
@@ -104,6 +107,9 @@ void ANativeActivity_onCreate(ANativeActivity *activity, void* savedState, size_
 			"(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
 		bio_cancel_method = find_static_method(env, current_class, "cancelBiometric", "()V");
 		bio_fp_method = find_static_method(env, current_class, "fingerprintAvailable", "()Z");
+		bio_hw_method = find_static_method(env, current_class, "fingerprintHardware", "()Z");
+		bio_noenroll_method = find_static_method(env, current_class, "fingerprintNoneEnrolled", "()Z");
+		bio_openenroll_method = find_static_method(env, current_class, "openBiometricEnroll", "()V");
 		bio_has_method = find_static_method(env, current_class, "bioHasSecret", "()Z");
 		bio_forget_method = find_static_method(env, current_class, "bioForget", "()V");
 		bio_take_method = find_static_method(env, current_class, "bioTakeSecret", "()Ljava/lang/String;");
@@ -162,6 +168,18 @@ void ANativeActivity_onCreate(ANativeActivity *activity, void* savedState, size_
 
 int32_t fingerprintAvailable(JNIEnv* env) {
 	return (int32_t)(*env)->CallStaticBooleanMethod(env, current_class, bio_fp_method);
+}
+
+int32_t fingerprintHardware(JNIEnv* env) {
+	return (int32_t)(*env)->CallStaticBooleanMethod(env, current_class, bio_hw_method);
+}
+
+int32_t fingerprintNoneEnrolled(JNIEnv* env) {
+	return (int32_t)(*env)->CallStaticBooleanMethod(env, current_class, bio_noenroll_method);
+}
+
+void openBiometricEnroll(JNIEnv* env) {
+	(*env)->CallStaticVoidMethod(env, current_class, bio_openenroll_method);
 }
 
 int32_t bioHasSecret(JNIEnv* env) {
