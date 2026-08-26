@@ -26,3 +26,9 @@ func BackPressed() bool { return false }
 
 // Finish is a no-op off Android.
 func Finish() {}
+
+// SetClipboard and GetClipboard are no-ops off Android: the clipboard there is reached
+// through the activity, and no other host in this package has one.
+func SetClipboard(string) {}
+
+func GetClipboard() string { return "" }

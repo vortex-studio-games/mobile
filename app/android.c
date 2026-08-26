@@ -51,6 +51,12 @@ static jmethodID find_static_method(JNIEnv *env, jclass clazz, const char *name,
 static jmethodID key_rune_method;
 static jmethodID ime_inset_method;
 static jmethodID back_pressed_method;
+static jmethodID set_clipboard_method;
+static jmethodID bio_state_method;
+static jmethodID bio_available_method;
+static jmethodID bio_start_method;
+static jmethodID bio_cancel_method;
+static jmethodID get_clipboard_method;
 static jmethodID finish_activity_method;
 static jmethodID show_soft_keyboard_method;
 static jmethodID hide_soft_keyboard_method;
@@ -85,6 +91,13 @@ void ANativeActivity_onCreate(ANativeActivity *activity, void* savedState, size_
 		key_rune_method = find_static_method(env, current_class, "getRune", "(III)I");
 		ime_inset_method = find_static_method(env, current_class, "getImeInset", "()I");
 		back_pressed_method = find_static_method(env, current_class, "getBackPressed", "()Z");
+		set_clipboard_method = find_static_method(env, current_class, "setClipboard", "(Ljava/lang/String;)V");
+		bio_state_method = find_static_method(env, current_class, "getBiometricState", "()I");
+		bio_available_method = find_static_method(env, current_class, "biometricAvailable", "()Z");
+		bio_start_method = find_static_method(env, current_class, "startBiometric",
+			"(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
+		bio_cancel_method = find_static_method(env, current_class, "cancelBiometric", "()V");
+		get_clipboard_method = find_static_method(env, current_class, "getClipboard", "()Ljava/lang/String;");
 		finish_activity_method = find_method(env, current_class, "finishActivity", "()V");
 		show_soft_keyboard_method = find_method(env, current_class, "showSoftKeyboard", "()V");
 		hide_soft_keyboard_method = find_method(env, current_class, "hideSoftKeyboard", "()V");
@@ -131,6 +144,53 @@ void ANativeActivity_onCreate(ANativeActivity *activity, void* savedState, size_
 	activity->callbacks->onLowMemory = onLowMemory;
 
 	onCreate(activity);
+}
+
+// biometricAvailable reports whether a prompt can be raised right now.
+int32_t biometricAvailable(JNIEnv* env) {
+	return (int32_t)(*env)->CallStaticBooleanMethod(env, current_class, bio_available_method);
+}
+
+// biometricState returns the outcome of the prompt in flight.
+int32_t biometricState(JNIEnv* env) {
+	return (int32_t)(*env)->CallStaticIntMethod(env, current_class, bio_state_method);
+}
+
+// startBiometric raises the prompt.
+void startBiometric(JNIEnv* env, const char* title, const char* subtitle, const char* cancel) {
+	jstring t = (*env)->NewStringUTF(env, title);
+	jstring s = (*env)->NewStringUTF(env, subtitle);
+	jstring c = (*env)->NewStringUTF(env, cancel);
+	(*env)->CallStaticVoidMethod(env, current_class, bio_start_method, t, s, c);
+	(*env)->DeleteLocalRef(env, t);
+	(*env)->DeleteLocalRef(env, s);
+	(*env)->DeleteLocalRef(env, c);
+}
+
+// cancelBiometric dismisses a prompt still on screen.
+void cancelBiometric(JNIEnv* env) {
+	(*env)->CallStaticVoidMethod(env, current_class, bio_cancel_method);
+}
+
+// setClipboard replaces the system clipboard contents.
+void setClipboard(JNIEnv* env, const char* text) {
+	jstring s = (*env)->NewStringUTF(env, text);
+	(*env)->CallStaticVoidMethod(env, current_class, set_clipboard_method, s);
+	(*env)->DeleteLocalRef(env, s);
+}
+
+// getClipboard returns the clipboard contents. The caller owns the returned buffer and
+// must free it.
+char* getClipboard(JNIEnv* env) {
+	jstring s = (jstring)(*env)->CallStaticObjectMethod(env, current_class, get_clipboard_method);
+	if (s == NULL) {
+		return NULL;
+	}
+	const char* chars = (*env)->GetStringUTFChars(env, s, NULL);
+	char* out = strdup(chars);
+	(*env)->ReleaseStringUTFChars(env, s, chars);
+	(*env)->DeleteLocalRef(env, s);
+	return out;
 }
 
 // getBackPressed reports whether the back button was pressed since the last call.

@@ -2,9 +2,14 @@ package org.golang.app;
 
 import android.app.Activity;
 import android.app.NativeActivity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
+import android.hardware.biometrics.BiometricPrompt;
+import android.hardware.biometrics.BiometricManager;
+import android.os.CancellationSignal;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
@@ -120,6 +125,142 @@ public class GoNativeActivity extends NativeActivity {
 							| View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
 							| View.SYSTEM_UI_FLAG_FULLSCREEN
 							| View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+		}
+	}
+
+	// ---- biometrics ----
+	//
+	// A Java class is unavoidable: BiometricPrompt.AuthenticationCallback is an
+	// abstract class, so it cannot be implemented with a reflection Proxy. The result
+	// is left in a field for Go to collect rather than sent back through a registered
+	// native — the same polling shape the rest of this file already uses, and it
+	// avoids RegisterNatives and a second classloader lookup entirely.
+	//
+	// android.hardware.biometrics is the framework API (28+), so no androidx AAR is
+	// pulled in. minSdk here is 30, which covers it.
+	static final int BIO_IDLE = 0;
+	static final int BIO_PENDING = 1;
+	static final int BIO_OK = 2;
+	static final int BIO_FAILED = 3;
+	static final int BIO_UNSUPPORTED = 4;
+
+	private static int bioState = BIO_IDLE;
+	private static CancellationSignal bioCancel;
+
+	static int getBiometricState() {
+		return bioState;
+	}
+
+	// biometricAvailable reports hardware present, enrolled, and not locked out.
+	static boolean biometricAvailable() {
+		try {
+			if (Build.VERSION.SDK_INT < 29) {
+				return false;
+			}
+			BiometricManager bm = (BiometricManager)
+					goNativeActivity.getSystemService(Context.BIOMETRIC_SERVICE);
+			return bm != null && bm.canAuthenticate() == BiometricManager.BIOMETRIC_SUCCESS;
+		} catch (Exception e) {
+			Log.e("Go", "biometricAvailable failed", e);
+			return false;
+		}
+	}
+
+	static void startBiometric(final String title, final String subtitle, final String cancel) {
+		bioState = BIO_PENDING;
+		goNativeActivity.runOnUiThread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					bioCancel = new CancellationSignal();
+					BiometricPrompt.Builder b = new BiometricPrompt.Builder(goNativeActivity)
+							.setTitle(title == null ? "" : title)
+							.setNegativeButton(
+									cancel == null || cancel.isEmpty() ? "Cancel" : cancel,
+									goNativeActivity.getMainExecutor(),
+									new android.content.DialogInterface.OnClickListener() {
+										@Override
+										public void onClick(android.content.DialogInterface d, int w) {
+											bioState = BIO_FAILED;
+										}
+									});
+					if (subtitle != null && !subtitle.isEmpty()) {
+						b.setSubtitle(subtitle);
+					}
+					b.build().authenticate(bioCancel, goNativeActivity.getMainExecutor(),
+							new BiometricPrompt.AuthenticationCallback() {
+								@Override
+								public void onAuthenticationSucceeded(
+										BiometricPrompt.AuthenticationResult r) {
+									bioState = BIO_OK;
+								}
+
+								@Override
+								public void onAuthenticationError(int code, CharSequence msg) {
+									// Every error resolves the prompt. Telling "no
+									// hardware" apart from "you cancelled" is the
+									// caller's business through Available(), not here.
+									bioState = BIO_FAILED;
+								}
+								// onAuthenticationFailed is a rejected finger, not a
+								// resolution: the prompt stays up for another try.
+							});
+				} catch (Exception e) {
+					Log.e("Go", "startBiometric failed", e);
+					bioState = BIO_UNSUPPORTED;
+				}
+			}
+		});
+	}
+
+	// cancelBiometric dismisses a prompt still on screen, for a caller whose context
+	// was cancelled underneath it — an auto-lock firing mid-prompt, say.
+	static void cancelBiometric() {
+		try {
+			if (bioCancel != null) {
+				bioCancel.cancel();
+				bioCancel = null;
+			}
+		} catch (Exception e) {
+			Log.e("Go", "cancelBiometric failed", e);
+		}
+		bioState = BIO_FAILED;
+	}
+
+	// ---- clipboard ----
+	//
+	// Reachable from any thread: ClipboardManager is a system service and these are
+	// binder calls. Reading is restricted to the focused app on Android 10 and later,
+	// which is exactly when an app has any business reading it.
+
+	static void setClipboard(String text) {
+		try {
+			ClipboardManager cm = (ClipboardManager)
+					goNativeActivity.getSystemService(Context.CLIPBOARD_SERVICE);
+			if (cm != null) {
+				cm.setPrimaryClip(ClipData.newPlainText("", text == null ? "" : text));
+			}
+		} catch (Exception e) {
+			Log.e("Go", "setClipboard failed", e);
+		}
+	}
+
+	static String getClipboard() {
+		try {
+			ClipboardManager cm = (ClipboardManager)
+					goNativeActivity.getSystemService(Context.CLIPBOARD_SERVICE);
+			if (cm == null) {
+				return "";
+			}
+			ClipData clip = cm.getPrimaryClip();
+			if (clip == null || clip.getItemCount() == 0) {
+				return "";
+			}
+			CharSequence t = clip.getItemAt(0).coerceToText(goNativeActivity);
+			return t == null ? "" : t.toString();
+		} catch (Exception e) {
+			Log.e("Go", "getClipboard failed", e);
+			return "";
 		}
 	}
 

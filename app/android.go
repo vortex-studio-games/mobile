@@ -33,10 +33,17 @@ package app
 #include <jni.h>
 #include <pthread.h>
 #include <stdlib.h>
+#include <string.h>
 
 int32_t getKeyRune(JNIEnv* env, AInputEvent* e);
 int32_t getImeInset(JNIEnv* env);
 int32_t getBackPressed(JNIEnv* env);
+void setClipboard(JNIEnv* env, const char* text);
+int32_t biometricAvailable(JNIEnv* env);
+int32_t biometricState(JNIEnv* env);
+void startBiometric(JNIEnv* env, const char* title, const char* subtitle, const char* cancel);
+void cancelBiometric(JNIEnv* env);
+char* getClipboard(JNIEnv* env);
 void finishActivity(JNIEnv* env);
 void showSoftKeyboard(JNIEnv* env);
 void hideSoftKeyboard(JNIEnv* env);
@@ -74,6 +81,85 @@ func ShowSoftKeyboard() {
 		C.showSoftKeyboard((*C.JNIEnv)(unsafe.Pointer(env)))
 		return nil
 	})
+}
+
+// Biometric prompt states, mirroring the constants in GoNativeActivity.
+const (
+	BioIdle = iota
+	BioPending
+	BioOK
+	BioFailed
+	BioUnsupported
+)
+
+// BiometricAvailable reports hardware present, enrolled, and not locked out.
+func BiometricAvailable() bool {
+	var ok bool
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		ok = C.biometricAvailable((*C.JNIEnv)(unsafe.Pointer(env))) != 0
+		return nil
+	})
+	return ok
+}
+
+// BiometricStart raises the system prompt. The result arrives through BiometricState:
+// the callback is an abstract Java class, so it is answered on the Java side and
+// collected here rather than pushed back through a registered native.
+func BiometricStart(title, subtitle, cancel string) {
+	ct, cs, cc := C.CString(title), C.CString(subtitle), C.CString(cancel)
+	defer C.free(unsafe.Pointer(ct))
+	defer C.free(unsafe.Pointer(cs))
+	defer C.free(unsafe.Pointer(cc))
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		C.startBiometric((*C.JNIEnv)(unsafe.Pointer(env)), ct, cs, cc)
+		return nil
+	})
+}
+
+// BiometricState reports how the prompt in flight has resolved, if it has.
+func BiometricState() int {
+	var st int
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		st = int(C.biometricState((*C.JNIEnv)(unsafe.Pointer(env))))
+		return nil
+	})
+	return st
+}
+
+// BiometricCancel dismisses a prompt still on screen.
+func BiometricCancel() {
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		C.cancelBiometric((*C.JNIEnv)(unsafe.Pointer(env)))
+		return nil
+	})
+}
+
+// SetClipboard replaces the system clipboard contents.
+func SetClipboard(text string) {
+	ctext := C.CString(text)
+	defer C.free(unsafe.Pointer(ctext))
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		C.setClipboard((*C.JNIEnv)(unsafe.Pointer(env)), ctext)
+		return nil
+	})
+}
+
+// GetClipboard returns the system clipboard contents, empty when it holds nothing this
+// app can read as text.
+//
+// Android 10 and later only let the focused app read the clipboard, which is the only
+// time an app has any business doing so.
+func GetClipboard() string {
+	var out string
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		c := C.getClipboard((*C.JNIEnv)(unsafe.Pointer(env)))
+		if c != nil {
+			out = C.GoString(c)
+			C.free(unsafe.Pointer(c))
+		}
+		return nil
+	})
+	return out
 }
 
 // BackPressed reports whether the system back button or gesture was used since the
