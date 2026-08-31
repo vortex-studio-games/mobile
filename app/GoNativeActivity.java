@@ -213,6 +213,26 @@ public class GoNativeActivity extends NativeActivity {
 		}
 	}
 
+	// setOrientation pins the activity to one orientation, or releases it.
+	//
+	// Done from Go rather than the manifest because one APK serves both shapes: the
+	// app decides which layout it is running from the measured screen, and the
+	// orientation has to follow that decision rather than a value baked in at build
+	// time. ActivityInfo's constants are passed through as ints so the Go side does
+	// not have to know the framework's names.
+	static void setOrientation(final int mode) {
+		goNativeActivity.runOnUiThread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					goNativeActivity.setRequestedOrientation(mode);
+				} catch (Exception e) {
+					Log.e("Go", "setRequestedOrientation failed", e);
+				}
+			}
+		});
+	}
+
 	// fingerprintHardware reports a sensor, whether or not anything is enrolled on it.
 	//
 	// This is the one that decides whether the app offers fingerprint unlock at all.

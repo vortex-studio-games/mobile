@@ -45,6 +45,7 @@ void startBiometric(JNIEnv* env, const char* title, const char* subtitle, const 
 void cancelBiometric(JNIEnv* env);
 int32_t fingerprintAvailable(JNIEnv* env);
 int32_t fingerprintHardware(JNIEnv* env);
+void setOrientation(JNIEnv* env, int32_t mode);
 int32_t fingerprintNoneEnrolled(JNIEnv* env);
 void openBiometricEnroll(JNIEnv* env);
 int32_t bioHasSecret(JNIEnv* env);
@@ -114,6 +115,22 @@ func FingerprintAvailable() bool {
 		return nil
 	})
 	return ok
+}
+
+// Orientation modes, matching android.content.pm.ActivityInfo.
+const (
+	OrientationUnspecified = -1
+	OrientationLandscape   = 0
+	OrientationPortrait    = 1
+)
+
+// SetOrientation pins the activity to an orientation, or releases it with
+// OrientationUnspecified.
+func SetOrientation(mode int) {
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		C.setOrientation((*C.JNIEnv)(unsafe.Pointer(env)), C.int32_t(mode))
+		return nil
+	})
 }
 
 // FingerprintHardware reports a sensor being present, enrolled or not.
