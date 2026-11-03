@@ -49,6 +49,25 @@ static jmethodID find_static_method(JNIEnv *env, jclass clazz, const char *name,
 }
 
 static jmethodID key_rune_method;
+static jmethodID ime_inset_method;
+static jmethodID back_pressed_method;
+static jmethodID set_clipboard_method;
+static jmethodID bio_state_method;
+static jmethodID bio_available_method;
+static jmethodID bio_start_method;
+static jmethodID bio_cancel_method;
+static jmethodID bio_fp_method;
+static jmethodID bio_hw_method;
+static jmethodID bio_noenroll_method;
+static jmethodID bio_openenroll_method;
+static jmethodID set_orientation_method;
+static jmethodID bio_has_method;
+static jmethodID bio_forget_method;
+static jmethodID bio_take_method;
+static jmethodID bio_enroll_method;
+static jmethodID bio_unlock_method;
+static jmethodID get_clipboard_method;
+static jmethodID finish_activity_method;
 static jmethodID show_soft_keyboard_method;
 static jmethodID hide_soft_keyboard_method;
 static jobject current_activity;
@@ -80,6 +99,28 @@ void ANativeActivity_onCreate(ANativeActivity *activity, void* savedState, size_
 		current_class = (*env)->GetObjectClass(env, activity->clazz);
 		current_class = (*env)->NewGlobalRef(env, current_class);
 		key_rune_method = find_static_method(env, current_class, "getRune", "(III)I");
+		ime_inset_method = find_static_method(env, current_class, "getImeInset", "()I");
+		back_pressed_method = find_static_method(env, current_class, "getBackPressed", "()Z");
+		set_clipboard_method = find_static_method(env, current_class, "setClipboard", "(Ljava/lang/String;)V");
+		bio_state_method = find_static_method(env, current_class, "getBiometricState", "()I");
+		bio_available_method = find_static_method(env, current_class, "biometricAvailable", "()Z");
+		bio_start_method = find_static_method(env, current_class, "startBiometric",
+			"(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
+		bio_cancel_method = find_static_method(env, current_class, "cancelBiometric", "()V");
+		bio_fp_method = find_static_method(env, current_class, "fingerprintAvailable", "()Z");
+		bio_hw_method = find_static_method(env, current_class, "fingerprintHardware", "()Z");
+		bio_noenroll_method = find_static_method(env, current_class, "fingerprintNoneEnrolled", "()Z");
+		bio_openenroll_method = find_static_method(env, current_class, "openBiometricEnroll", "()V");
+		set_orientation_method = find_static_method(env, current_class, "setOrientation", "(I)V");
+		bio_has_method = find_static_method(env, current_class, "bioHasSecret", "()Z");
+		bio_forget_method = find_static_method(env, current_class, "bioForget", "()V");
+		bio_take_method = find_static_method(env, current_class, "bioTakeSecret", "()Ljava/lang/String;");
+		bio_enroll_method = find_static_method(env, current_class, "bioEnroll",
+			"(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
+		bio_unlock_method = find_static_method(env, current_class, "bioUnlock",
+			"(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
+		get_clipboard_method = find_static_method(env, current_class, "getClipboard", "()Ljava/lang/String;");
+		finish_activity_method = find_method(env, current_class, "finishActivity", "()V");
 		show_soft_keyboard_method = find_method(env, current_class, "showSoftKeyboard", "()V");
 		hide_soft_keyboard_method = find_method(env, current_class, "hideSoftKeyboard", "()V");
 		current_activity = (*env)->NewGlobalRef(env, activity->clazz);
@@ -125,6 +166,130 @@ void ANativeActivity_onCreate(ANativeActivity *activity, void* savedState, size_
 	activity->callbacks->onLowMemory = onLowMemory;
 
 	onCreate(activity);
+}
+
+int32_t fingerprintAvailable(JNIEnv* env) {
+	return (int32_t)(*env)->CallStaticBooleanMethod(env, current_class, bio_fp_method);
+}
+
+void setOrientation(JNIEnv* env, int32_t mode) {
+	(*env)->CallStaticVoidMethod(env, current_class, set_orientation_method, (jint)mode);
+}
+
+int32_t fingerprintHardware(JNIEnv* env) {
+	return (int32_t)(*env)->CallStaticBooleanMethod(env, current_class, bio_hw_method);
+}
+
+int32_t fingerprintNoneEnrolled(JNIEnv* env) {
+	return (int32_t)(*env)->CallStaticBooleanMethod(env, current_class, bio_noenroll_method);
+}
+
+void openBiometricEnroll(JNIEnv* env) {
+	(*env)->CallStaticVoidMethod(env, current_class, bio_openenroll_method);
+}
+
+int32_t bioHasSecret(JNIEnv* env) {
+	return (int32_t)(*env)->CallStaticBooleanMethod(env, current_class, bio_has_method);
+}
+
+void bioForget(JNIEnv* env) {
+	(*env)->CallStaticVoidMethod(env, current_class, bio_forget_method);
+}
+
+char* bioTakeSecret(JNIEnv* env) {
+	jstring s = (jstring)(*env)->CallStaticObjectMethod(env, current_class, bio_take_method);
+	if (s == NULL) {
+		return NULL;
+	}
+	const char* chars = (*env)->GetStringUTFChars(env, s, NULL);
+	char* out = strdup(chars);
+	(*env)->ReleaseStringUTFChars(env, s, chars);
+	(*env)->DeleteLocalRef(env, s);
+	return out;
+}
+
+void bioEnroll(JNIEnv* env, const char* t, const char* sub, const char* c, const char* secret) {
+	jstring jt = (*env)->NewStringUTF(env, t);
+	jstring js = (*env)->NewStringUTF(env, sub);
+	jstring jc = (*env)->NewStringUTF(env, c);
+	jstring jx = (*env)->NewStringUTF(env, secret);
+	(*env)->CallStaticVoidMethod(env, current_class, bio_enroll_method, jt, js, jc, jx);
+	(*env)->DeleteLocalRef(env, jt);
+	(*env)->DeleteLocalRef(env, js);
+	(*env)->DeleteLocalRef(env, jc);
+	(*env)->DeleteLocalRef(env, jx);
+}
+
+void bioUnlock(JNIEnv* env, const char* t, const char* sub, const char* c) {
+	jstring jt = (*env)->NewStringUTF(env, t);
+	jstring js = (*env)->NewStringUTF(env, sub);
+	jstring jc = (*env)->NewStringUTF(env, c);
+	(*env)->CallStaticVoidMethod(env, current_class, bio_unlock_method, jt, js, jc);
+	(*env)->DeleteLocalRef(env, jt);
+	(*env)->DeleteLocalRef(env, js);
+	(*env)->DeleteLocalRef(env, jc);
+}
+
+// biometricAvailable reports whether a prompt can be raised right now.
+int32_t biometricAvailable(JNIEnv* env) {
+	return (int32_t)(*env)->CallStaticBooleanMethod(env, current_class, bio_available_method);
+}
+
+// biometricState returns the outcome of the prompt in flight.
+int32_t biometricState(JNIEnv* env) {
+	return (int32_t)(*env)->CallStaticIntMethod(env, current_class, bio_state_method);
+}
+
+// startBiometric raises the prompt.
+void startBiometric(JNIEnv* env, const char* title, const char* subtitle, const char* cancel) {
+	jstring t = (*env)->NewStringUTF(env, title);
+	jstring s = (*env)->NewStringUTF(env, subtitle);
+	jstring c = (*env)->NewStringUTF(env, cancel);
+	(*env)->CallStaticVoidMethod(env, current_class, bio_start_method, t, s, c);
+	(*env)->DeleteLocalRef(env, t);
+	(*env)->DeleteLocalRef(env, s);
+	(*env)->DeleteLocalRef(env, c);
+}
+
+// cancelBiometric dismisses a prompt still on screen.
+void cancelBiometric(JNIEnv* env) {
+	(*env)->CallStaticVoidMethod(env, current_class, bio_cancel_method);
+}
+
+// setClipboard replaces the system clipboard contents.
+void setClipboard(JNIEnv* env, const char* text) {
+	jstring s = (*env)->NewStringUTF(env, text);
+	(*env)->CallStaticVoidMethod(env, current_class, set_clipboard_method, s);
+	(*env)->DeleteLocalRef(env, s);
+}
+
+// getClipboard returns the clipboard contents. The caller owns the returned buffer and
+// must free it.
+char* getClipboard(JNIEnv* env) {
+	jstring s = (jstring)(*env)->CallStaticObjectMethod(env, current_class, get_clipboard_method);
+	if (s == NULL) {
+		return NULL;
+	}
+	const char* chars = (*env)->GetStringUTFChars(env, s, NULL);
+	char* out = strdup(chars);
+	(*env)->ReleaseStringUTFChars(env, s, chars);
+	(*env)->DeleteLocalRef(env, s);
+	return out;
+}
+
+// getBackPressed reports whether the back button was pressed since the last call.
+int32_t getBackPressed(JNIEnv* env) {
+	return (int32_t)(*env)->CallStaticBooleanMethod(env, current_class, back_pressed_method);
+}
+
+// finishActivity leaves the app.
+void finishActivity(JNIEnv* env) {
+	(*env)->CallVoidMethod(env, current_activity, finish_activity_method);
+}
+
+// getImeInset returns how many pixels of the window the keyboard covers.
+int32_t getImeInset(JNIEnv* env) {
+	return (int32_t)(*env)->CallStaticIntMethod(env, current_class, ime_inset_method);
 }
 
 int32_t getKeyRune(JNIEnv* env, AInputEvent* e) {

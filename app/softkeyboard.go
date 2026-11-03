@@ -17,3 +17,35 @@ func ShowSoftKeyboard() {
 func HideSoftKeyboard() {
 	// No-op on desktop/iOS
 }
+
+// IMEInsetPx is 0 off Android: no other host reports a keyboard inset.
+func IMEInsetPx() int { return 0 }
+
+// BackPressed is always false off Android: no other host has a system back button.
+func BackPressed() bool { return false }
+
+// Finish is a no-op off Android.
+func Finish() {}
+
+// SetClipboard and GetClipboard are no-ops off Android: the clipboard there is reached
+// through the activity, and no other host in this package has one.
+func SetClipboard(string) {}
+
+func GetClipboard() string { return "" }
+
+// The biometric-wrapped secret is Android-only; every other host in this package
+// reports nothing available and stores nothing.
+func FingerprintAvailable() bool    { return false }
+func FingerprintHardware() bool     { return false }
+func FingerprintNoneEnrolled() bool { return false }
+func OpenBiometricEnroll()          {}
+
+func BioHasSecret() bool { return false }
+
+func BioForget() {}
+
+func BioTakeSecret() string { return "" }
+
+func BioEnroll(title, subtitle, cancel, base64Secret string) {}
+
+func BioUnlock(title, subtitle, cancel string) {}

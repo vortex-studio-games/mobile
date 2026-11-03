@@ -33,8 +33,28 @@ package app
 #include <jni.h>
 #include <pthread.h>
 #include <stdlib.h>
+#include <string.h>
 
 int32_t getKeyRune(JNIEnv* env, AInputEvent* e);
+int32_t getImeInset(JNIEnv* env);
+int32_t getBackPressed(JNIEnv* env);
+void setClipboard(JNIEnv* env, const char* text);
+int32_t biometricAvailable(JNIEnv* env);
+int32_t biometricState(JNIEnv* env);
+void startBiometric(JNIEnv* env, const char* title, const char* subtitle, const char* cancel);
+void cancelBiometric(JNIEnv* env);
+int32_t fingerprintAvailable(JNIEnv* env);
+int32_t fingerprintHardware(JNIEnv* env);
+void setOrientation(JNIEnv* env, int32_t mode);
+int32_t fingerprintNoneEnrolled(JNIEnv* env);
+void openBiometricEnroll(JNIEnv* env);
+int32_t bioHasSecret(JNIEnv* env);
+void bioForget(JNIEnv* env);
+char* bioTakeSecret(JNIEnv* env);
+void bioEnroll(JNIEnv* env, const char* t, const char* sub, const char* c, const char* secret);
+void bioUnlock(JNIEnv* env, const char* t, const char* sub, const char* c);
+char* getClipboard(JNIEnv* env);
+void finishActivity(JNIEnv* env);
 void showSoftKeyboard(JNIEnv* env);
 void hideSoftKeyboard(JNIEnv* env);
 */
@@ -71,6 +91,247 @@ func ShowSoftKeyboard() {
 		C.showSoftKeyboard((*C.JNIEnv)(unsafe.Pointer(env)))
 		return nil
 	})
+}
+
+// Biometric prompt states, mirroring the constants in GoNativeActivity.
+const (
+	BioIdle = iota
+	BioPending
+	BioOK
+	BioFailed
+	BioUnsupported
+)
+
+// FingerprintAvailable reports whether this device has a fingerprint sensor that can
+// currently authenticate.
+//
+// It gates the affordance, not the prompt: BiometricPrompt has no fingerprint-only
+// selector, and on hardware where face unlock is also Class 3 — Pixel 8 and 9 — a
+// strong prompt accepts either. Everything it accepts is hardware-backed.
+func FingerprintAvailable() bool {
+	var ok bool
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		ok = C.fingerprintAvailable((*C.JNIEnv)(unsafe.Pointer(env))) != 0
+		return nil
+	})
+	return ok
+}
+
+// Orientation modes, matching android.content.pm.ActivityInfo.
+const (
+	OrientationUnspecified = -1
+	OrientationLandscape   = 0
+	OrientationPortrait    = 1
+)
+
+// SetOrientation pins the activity to an orientation, or releases it with
+// OrientationUnspecified.
+func SetOrientation(mode int) {
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		C.setOrientation((*C.JNIEnv)(unsafe.Pointer(env)), C.int32_t(mode))
+		return nil
+	})
+}
+
+// FingerprintHardware reports a sensor being present, enrolled or not.
+//
+// The affordance is gated on this rather than on FingerprintAvailable: a person who
+// has not set up a fingerprint yet still has the feature, one step away, and hiding it
+// from them is how a setting stays undiscovered.
+func FingerprintHardware() bool {
+	var ok bool
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		ok = C.fingerprintHardware((*C.JNIEnv)(unsafe.Pointer(env))) != 0
+		return nil
+	})
+	return ok
+}
+
+// FingerprintNoneEnrolled reports the sensor being present with nothing enrolled on it —
+// the one biometric failure the person can fix themselves.
+func FingerprintNoneEnrolled() bool {
+	var ok bool
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		ok = C.fingerprintNoneEnrolled((*C.JNIEnv)(unsafe.Pointer(env))) != 0
+		return nil
+	})
+	return ok
+}
+
+// OpenBiometricEnroll opens the system's enrolment screen. It returns as soon as the
+// intent is dispatched; the app is backgrounded until the person comes back.
+func OpenBiometricEnroll() {
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		C.openBiometricEnroll((*C.JNIEnv)(unsafe.Pointer(env)))
+		return nil
+	})
+}
+
+// BioHasSecret reports whether a secret is already wrapped on this device.
+func BioHasSecret() bool {
+	var ok bool
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		ok = C.bioHasSecret((*C.JNIEnv)(unsafe.Pointer(env))) != 0
+		return nil
+	})
+	return ok
+}
+
+// BioForget destroys the wrapped secret and the Keystore key that opens it.
+func BioForget() {
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		C.bioForget((*C.JNIEnv)(unsafe.Pointer(env)))
+		return nil
+	})
+}
+
+// BioTakeSecret collects the unwrapped secret, base64, exactly once.
+func BioTakeSecret() string {
+	var out string
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		c := C.bioTakeSecret((*C.JNIEnv)(unsafe.Pointer(env)))
+		if c != nil {
+			out = C.GoString(c)
+			C.free(unsafe.Pointer(c))
+		}
+		return nil
+	})
+	return out
+}
+
+// BioEnroll wraps a secret behind a prompt. The outcome arrives via BiometricState.
+func BioEnroll(title, subtitle, cancel, base64Secret string) {
+	ct, cs, cc, cx := C.CString(title), C.CString(subtitle), C.CString(cancel), C.CString(base64Secret)
+	defer C.free(unsafe.Pointer(ct))
+	defer C.free(unsafe.Pointer(cs))
+	defer C.free(unsafe.Pointer(cc))
+	defer C.free(unsafe.Pointer(cx))
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		C.bioEnroll((*C.JNIEnv)(unsafe.Pointer(env)), ct, cs, cc, cx)
+		return nil
+	})
+}
+
+// BioUnlock unwraps it behind a prompt. Collect with BioTakeSecret on success.
+func BioUnlock(title, subtitle, cancel string) {
+	ct, cs, cc := C.CString(title), C.CString(subtitle), C.CString(cancel)
+	defer C.free(unsafe.Pointer(ct))
+	defer C.free(unsafe.Pointer(cs))
+	defer C.free(unsafe.Pointer(cc))
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		C.bioUnlock((*C.JNIEnv)(unsafe.Pointer(env)), ct, cs, cc)
+		return nil
+	})
+}
+
+// BiometricAvailable reports hardware present, enrolled, and not locked out.
+func BiometricAvailable() bool {
+	var ok bool
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		ok = C.biometricAvailable((*C.JNIEnv)(unsafe.Pointer(env))) != 0
+		return nil
+	})
+	return ok
+}
+
+// BiometricStart raises the system prompt. The result arrives through BiometricState:
+// the callback is an abstract Java class, so it is answered on the Java side and
+// collected here rather than pushed back through a registered native.
+func BiometricStart(title, subtitle, cancel string) {
+	ct, cs, cc := C.CString(title), C.CString(subtitle), C.CString(cancel)
+	defer C.free(unsafe.Pointer(ct))
+	defer C.free(unsafe.Pointer(cs))
+	defer C.free(unsafe.Pointer(cc))
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		C.startBiometric((*C.JNIEnv)(unsafe.Pointer(env)), ct, cs, cc)
+		return nil
+	})
+}
+
+// BiometricState reports how the prompt in flight has resolved, if it has.
+func BiometricState() int {
+	var st int
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		st = int(C.biometricState((*C.JNIEnv)(unsafe.Pointer(env))))
+		return nil
+	})
+	return st
+}
+
+// BiometricCancel dismisses a prompt still on screen.
+func BiometricCancel() {
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		C.cancelBiometric((*C.JNIEnv)(unsafe.Pointer(env)))
+		return nil
+	})
+}
+
+// SetClipboard replaces the system clipboard contents.
+func SetClipboard(text string) {
+	ctext := C.CString(text)
+	defer C.free(unsafe.Pointer(ctext))
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		C.setClipboard((*C.JNIEnv)(unsafe.Pointer(env)), ctext)
+		return nil
+	})
+}
+
+// GetClipboard returns the system clipboard contents, empty when it holds nothing this
+// app can read as text.
+//
+// Android 10 and later only let the focused app read the clipboard, which is the only
+// time an app has any business doing so.
+func GetClipboard() string {
+	var out string
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		c := C.getClipboard((*C.JNIEnv)(unsafe.Pointer(env)))
+		if c != nil {
+			out = C.GoString(c)
+			C.free(unsafe.Pointer(c))
+		}
+		return nil
+	})
+	return out
+}
+
+// BackPressed reports whether the system back button or gesture was used since the
+// last call, and consumes it.
+//
+// The activity keeps the press rather than finishing on it, so an application with
+// screens of its own can go back one instead of closing. An application that collects
+// these must also call Finish when it has nowhere left to go, or back stops working at
+// the top level.
+func BackPressed() bool {
+	var pressed bool
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		pressed = C.getBackPressed((*C.JNIEnv)(unsafe.Pointer(env))) != 0
+		return nil
+	})
+	return pressed
+}
+
+// Finish leaves the app, for a back press with nothing left to pop.
+func Finish() {
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		C.finishActivity((*C.JNIEnv)(unsafe.Pointer(env)))
+		return nil
+	})
+}
+
+// IMEInsetPx returns how many pixels of the window the soft keyboard currently
+// covers, or 0 when none is showing.
+//
+// A NativeActivity is not resized for the IME — the system reports it as an inset and
+// leaves the surface alone, which is what a GPU surface wants. The cost is that an app
+// has to keep its own content out of the covered strip, and this is how it learns how
+// tall that strip is.
+func IMEInsetPx() int {
+	var inset int
+	mobileinit.RunOnJVM(func(vm, env, ctx uintptr) error {
+		inset = int(C.getImeInset((*C.JNIEnv)(unsafe.Pointer(env))))
+		return nil
+	})
+	return inset
 }
 
 // HideSoftKeyboard hides the Android soft keyboard.

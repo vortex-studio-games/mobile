@@ -38,10 +38,25 @@ func goAppleBuild(pkg *packages.Package, bundleID string, targets []targetInfo) 
 		return nil, err
 	}
 
-	// Detect the team ID
-	teamID, err := detectTeamID()
-	if err != nil {
-		return nil, err
+	// Code signing is required to build for a physical device, but the iOS
+	// Simulator runs unsigned apps. Detect a simulator-only build and skip the
+	// signing-identity lookup so a Mac with no Apple Development certificate
+	// (e.g. a headless CI build appliance) can still produce a runnable .app.
+	simOnly := true
+	for _, t := range targets {
+		if t.platform != "iossimulator" {
+			simOnly = false
+			break
+		}
+	}
+
+	var teamID string
+	if !simOnly {
+		var err error
+		teamID, err = detectTeamID()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	projPbxproj := new(bytes.Buffer)
@@ -93,8 +108,16 @@ func goAppleBuild(pkg *packages.Package, bundleID string, targets []targetInfo) 
 
 		path := filepath.Join(tmpdir, t.platform, t.arch)
 
-		// Disable DWARF; see golang.org/issues/25148.
-		if err := goBuild(src, appleEnv[t.String()], "-ldflags=-w", "-o="+path); err != nil {
+		// Disable DWARF (golang.org/issues/25148) AND preserve the user's
+		// -ldflags. goCmdAt auto-appends -ldflags=<buildLdflags>, so passing a
+		// bare -ldflags=-w here would come last and clobber it (dropping e.g.
+		// -X main.var=... injections). Fold both into one -ldflags so the
+		// winning (last) value carries -w and the user's flags.
+		ldflags := "-w"
+		if buildLdflags != "" {
+			ldflags += " " + buildLdflags
+		}
+		if err := goBuild(src, appleEnv[t.String()], "-ldflags="+ldflags, "-o="+path); err != nil {
 			return nil, err
 		}
 		if nmpkgs == nil {
@@ -122,14 +145,33 @@ func goAppleBuild(pkg *packages.Package, bundleID string, targets []targetInfo) 
 		"xcodebuild",
 		"-configuration", "Release",
 		"-project", tmpdir + "/main.xcodeproj",
-		"-allowProvisioningUpdates",
-		"DEVELOPMENT_TEAM=" + teamID,
+	}
+	if simOnly {
+		// Target the simulator SDK and disable code signing: the simulator runs
+		// unsigned apps, and a build appliance may hold no signing identity.
+		cmdStrings = append(cmdStrings,
+			"-sdk", "iphonesimulator",
+			"CODE_SIGNING_ALLOWED=NO",
+			"CODE_SIGNING_REQUIRED=NO",
+		)
+	} else {
+		cmdStrings = append(cmdStrings,
+			"-allowProvisioningUpdates",
+			"DEVELOPMENT_TEAM="+teamID,
+		)
 	}
 
 	cmd = exec.Command("xcrun", cmdStrings...)
 	if err := runCmd(cmd); err != nil {
 		return nil, err
 	}
+
+	// xcodebuild writes to a per-SDK products dir.
+	releaseDir := "Release-iphoneos"
+	if simOnly {
+		releaseDir = "Release-iphonesimulator"
+	}
+	builtApp := tmpdir + "/build/" + releaseDir + "/main.app"
 
 	// TODO(jbd): Fallback to copying if renaming fails.
 	if buildO == "" {
@@ -146,14 +188,14 @@ func goAppleBuild(pkg *packages.Package, bundleID string, targets []targetInfo) 
 		buildO = n + ".app"
 	}
 	if buildX {
-		printcmd("mv %s %s", tmpdir+"/build/Release-iphoneos/main.app", buildO)
+		printcmd("mv %s %s", builtApp, buildO)
 	}
 	if !buildN {
 		// if output already exists, remove.
 		if err := os.RemoveAll(buildO); err != nil {
 			return nil, err
 		}
-		if err := os.Rename(tmpdir+"/build/Release-iphoneos/main.app", buildO); err != nil {
+		if err := os.Rename(builtApp, buildO); err != nil {
 			return nil, err
 		}
 	}
@@ -378,8 +420,8 @@ var projPbxprojTmpl = template.Must(template.New("projPbxproj").Parse(`// !$*UTF
         ORGANIZATIONNAME = Developer;
         TargetAttributes = {
           254BB83D1B1FD08900C56DE9 = {
-            CreatedOnToolsVersion = 6.3.1;
-            DevelopmentTeam = {{.TeamID}};
+            CreatedOnToolsVersion = 6.3.1;{{if .TeamID}}
+            DevelopmentTeam = {{.TeamID}};{{end}}
           };
         };
       };

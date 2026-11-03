@@ -13,7 +13,13 @@
 #endif
 
 #ifdef os_ios
-#include <OpenGLES/ES2/glext.h>
+// Use GLES3 for ES 3.0 features like instancing (glDrawArraysInstanced,
+// glVertexAttribDivisor, ...). iOS has supported OpenGLES 3.0 since iOS 7, on
+// both device and simulator; the ES2 headers only declare the *EXT variants,
+// which modern clang rejects as implicit declarations. Mirrors the Android
+// branch above.
+#include <OpenGLES/ES3/gl.h>
+#include <OpenGLES/ES3/glext.h>
 #endif
 
 #ifdef os_macos
